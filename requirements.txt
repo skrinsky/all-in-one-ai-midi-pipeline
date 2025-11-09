@@ -1,27 +1,32 @@
-# Core audio/MIDI
+# Core audio/MIDI stack
 numpy==1.24.3
-typing-extensions==4.5.0
-librosa>=0.10.1
-soundfile>=0.12.1
 scipy==1.10.1
+librosa==0.10.1
+soundfile>=0.12.1
 pretty_midi>=0.2.10
 mido>=1.3.2
+music21==8.3.0
 tqdm>=4.66
 pyyaml>=6.0.1
 
+# Pitch transcription - Basic Pitch
+basic-pitch==0.3.0
+mir-eval>=0.8
+
 # Separation (HTDemucs)
-demucs>=4.0.0
+demucs==4.0.1
 
-# Key detection
-music21==8.3.0
+# Torch stack (needed by Demucs + ADTOF)
+torch==2.1.0
+torchaudio==2.1.0
 
-# Pitch transcription
-basic-pitch==0.2.6
-# Note: basic-pitch extras (tensorflow-macos / tflite-runtime / onnxruntime)
-# should be installed/pinned manually for your platform if you need them.
+# Drum transcription (ADTOF) from GitHub
+# This installs the library so that `import adtof_pytorch` works.
+adtof_pytorch @ git+https://github.com/xavriley/ADTOF-pytorch.git@main#egg=adtof_pytorch
 
-# Drum transcription (ADTOF)
-adtof-pytorch>=0.1.0  # use the version you installed; this repo assumes it's available
-
-# Optional: QC / UI
+# Optional: QC / simple UI
 gradio>=4.0.0
+
+# Optional extras (documented, not required for basic use):
+# basic-pitch[tf]     # if you want TensorFlow SavedModel support as well
+# madmom==0.16.1      # if you want madmom beat/downbeat functions
