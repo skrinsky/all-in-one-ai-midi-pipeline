@@ -12,8 +12,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Virtual environment setup:
 ```bash
-python3.10 -m venv .venv-ai-midi
-source .venv-ai-midi/bin/activate
+python3.10 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 

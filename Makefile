@@ -25,26 +25,29 @@ setup:
 	@echo "==> Setting up environment with uv..."
 	./setup.bash
 
+# Python interpreter from venv
+PYTHON := .venv/bin/python
+
 # Run pipeline on all raw files (default: no key normalization)
 run:
 	@echo "==> Processing all files in data/raw/*.wav..."
-	python pipeline.py run-batch "data/raw/*.wav"
+	$(PYTHON) pipeline.py run-batch "data/raw/*.wav"
 
 # Run pipeline with key normalization
 run-normalize:
 	@echo "==> Processing all files with key normalization..."
-	python pipeline.py run-batch "data/raw/*.wav" --normalize-key
+	$(PYTHON) pipeline.py run-batch "data/raw/*.wav" --normalize-key
 
 # Review pending items
 review:
 	@echo "==> Opening review UI..."
-	python pipeline.py review-pending
+	$(PYTHON) pipeline.py review-pending
 
 # Export MIDI files (default output directory)
 OUT ?= out_midis
 export:
 	@echo "==> Exporting MIDI files to $(OUT)/..."
-	python pipeline.py export-midi --out $(OUT)
+	$(PYTHON) pipeline.py export-midi --out $(OUT)
 
 # Process a single file (requires FILE=path/to/file.wav)
 process-file:
@@ -53,7 +56,7 @@ process-file:
 		exit 1; \
 	fi
 	@echo "==> Processing $(FILE)..."
-	python pipeline.py run-batch "$(FILE)"
+	$(PYTHON) pipeline.py run-batch "$(FILE)"
 
 # Process a single file with key normalization
 process-file-norm:
@@ -62,7 +65,7 @@ process-file-norm:
 		exit 1; \
 	fi
 	@echo "==> Processing $(FILE) with key normalization..."
-	python pipeline.py run-batch "$(FILE)" --normalize-key
+	$(PYTHON) pipeline.py run-batch "$(FILE)" --normalize-key
 
 # Clean targets
 clean-stems:
