@@ -5,7 +5,7 @@ __pycache__/
 *.pyd
 *.so
 
-# Virtual env
+# Virtual envs
 .venv/
 .venv-ai-midi/
 
@@ -15,9 +15,10 @@ __pycache__/
 .DS_Store
 
 # Audio & large generated data
-data/raw/
-data/stems/
-data/midi/
+# Keep the directories but ignore their contents by default
+data/raw/*
+data/stems/*
+data/midi/*
 data/cache/
 data/checkpoints/
 data/models/
@@ -27,6 +28,10 @@ data/models/
 *.flac
 *.mp3
 
-# Manifests can be kept or regenerated; if you don't want them in git:
-# manifests/
+# Allow placeholder files so these dirs stay in git
+!data/raw/.gitkeep
+!data/stems/.gitkeep
+!data/midi/.gitkeep
 
+# Manifests can be kept or regenerated
+#manifests/
