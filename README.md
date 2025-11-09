@@ -127,8 +127,7 @@ pipeline.py review-pending + steps/qc_render.py hooks for quick listening / insp
 Install
 Use Python 3.10 (this repo is tuned for it).
 
-bash
-Copy code
+
 # 1) Create & activate venv
 python3.10 -m venv .venv-ai-midi
 source .venv-ai-midi/bin/activate
@@ -155,22 +154,22 @@ You already have the exact pinned versions in your actual requirements.txt; keep
 
 Usage
 1. Add Audio
-bash
-Copy code
+
 mkdir -p data/raw
+
 cp /path/to/YourSong.wav data/raw/
+
 2. Run the Pipeline
 Default (no key normalization):
 
-bash
-Copy code
 python pipeline.py run-batch "data/raw/*.wav"
+
 With key normalization to Cmaj/Amin:
 
-bash
-Copy code
 python pipeline.py run-batch "data/raw/*.wav" --normalize-key
+
 3. Inspect Outputs
+
 For a song YourSong.wav:
 
 Stems: data/stems/YourSong/...
@@ -180,8 +179,7 @@ Manifest: manifests/YourSong.json
 MIDI: data/midi/YourSong/YourSong.mid
 
 4. Extra Commands
-bash
-Copy code
+
 # Review items that want human ears/eyes
 python pipeline.py review-pending
 
