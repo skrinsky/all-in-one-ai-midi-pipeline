@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual env
+.venv/
+.venv-ai-midi/
+
+# Local config / caches
+*.log
+*.tmp
+.DS_Store
+
+# Audio & large generated data
+data/raw/
+data/stems/
+data/midi/
+data/cache/
+data/checkpoints/
+data/models/
+*.wav
+*.aiff
+*.aif
+*.flac
+*.mp3
+
+# Manifests can be kept or regenerated; if you don't want them in git:
+# manifests/
+

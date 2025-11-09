@@ -1,0 +1,48 @@
+{
+  "song_id": "ANDROID_HYMN",
+  "source_audio": "data/raw/ANDROID_HYMN.wav",
+  "separation": {
+    "model": "htdemucs_6s",
+    "path": "data/stems/htdemucs_6s/ANDROID_HYMN",
+    "stems": {
+      "vocals": "data/stems/htdemucs_6s/ANDROID_HYMN/vocals.wav",
+      "drums": "data/stems/htdemucs_6s/ANDROID_HYMN/drums.wav",
+      "bass": "data/stems/htdemucs_6s/ANDROID_HYMN/bass.wav",
+      "guitar": "data/stems/htdemucs_6s/ANDROID_HYMN/guitar.wav",
+      "other": "data/stems/htdemucs_6s/ANDROID_HYMN/other_merged.wav"
+    }
+  },
+  "meter_key": {
+    "tempo": 147.65625,
+    "time_signature_written": false
+  },
+  "transcription": {
+    "pitched": {
+      "voxlead": true,
+      "voxbg": true,
+      "bass": true,
+      "guitar": true,
+      "other": true
+    },
+    "drums": true
+  },
+  "assignment": {
+    "tracks": [
+      "drums",
+      "voxlead",
+      "voxbg",
+      "bass",
+      "guitar",
+      "other"
+    ]
+  },
+  "key": {
+    "detected": null
+  },
+  "cleanup": {
+    "applied": false
+  },
+  "output": {
+    "midi": "data/midi/ANDROID_HYMN/ANDROID_HYMN.mid"
+  }
+}

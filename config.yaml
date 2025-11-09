@@ -1,0 +1,25 @@
+# Global config & thresholds
+separation:
+  model: htdemucs
+  out_dir: data/stems
+
+meter_key:
+  meter_conf_threshold: 0.58   # below => manual review
+  key_conf_threshold: 0.55     # below => manual review
+
+transcription:
+  basic_pitch_threshold_cents: 30  # fuse-agreement window
+  drum_quantize_strength: 0.35     # 0..1 (light quantize)
+
+cleanup:
+  max_quantize_ms: 25
+  min_note_ms: 50
+
+classes:
+  - voxlead
+  - auxvox
+  - voxharm
+  - guitar
+  - synth
+  - bass
+  - drums

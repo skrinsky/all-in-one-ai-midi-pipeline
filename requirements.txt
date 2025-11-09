@@ -1,0 +1,27 @@
+# Core audio/MIDI
+numpy==1.24.3
+typing-extensions==4.5.0
+librosa>=0.10.1
+soundfile>=0.12.1
+scipy==1.10.1
+pretty_midi>=0.2.10
+mido>=1.3.2
+tqdm>=4.66
+pyyaml>=6.0.1
+
+# Separation (HTDemucs)
+demucs>=4.0.0
+
+# Key detection
+music21==8.3.0
+
+# Pitch transcription
+basic-pitch==0.2.6
+# Note: basic-pitch extras (tensorflow-macos / tflite-runtime / onnxruntime)
+# should be installed/pinned manually for your platform if you need them.
+
+# Drum transcription (ADTOF)
+adtof-pytorch>=0.1.0  # use the version you installed; this repo assumes it's available
+
+# Optional: QC / UI
+gradio>=4.0.0

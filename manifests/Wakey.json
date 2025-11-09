@@ -1,0 +1,62 @@
+{
+  "song_id": "Wakey",
+  "source_audio": "data/raw/Wakey.wav",
+  "separation": {
+    "model": "htdemucs_6s",
+    "path": "data/stems/htdemucs_6s/Wakey",
+    "stems": {
+      "vocals": "data/stems/htdemucs_6s/Wakey/vocals.wav",
+      "drums": "data/stems/htdemucs_6s/Wakey/drums.wav",
+      "bass": "data/stems/htdemucs_6s/Wakey/bass.wav",
+      "guitar": "data/stems/htdemucs_6s/Wakey/guitar.wav",
+      "other": "data/stems/htdemucs_6s/Wakey/other_merged.wav"
+    }
+  },
+  "meter_key": {
+    "tempo": 105.46875,
+    "time_signature_written": false
+  },
+  "transcription": {
+    "pitched": {
+      "voxlead": true,
+      "voxbg": true,
+      "bass": true,
+      "guitar": true,
+      "other": true
+    },
+    "drums": true,
+    "pitched_debug": {
+      "crepe_lead_count": 659,
+      "bp_vocal_count": 1098,
+      "crepe_used": true,
+      "crepe_error": "No module named 'tensorflow'",
+      "crepe_valid_frames": 28201,
+      "crepe_conf_mean": 0.6583613753318787
+    }
+  },
+  "assignment": {
+    "tracks": [
+      "drums",
+      "voxlead",
+      "voxbg",
+      "bass",
+      "guitar",
+      "other"
+    ]
+  },
+  "key": {
+    "detected": null,
+    "detected_tonic": "B",
+    "detected_mode": "major",
+    "normalized": true,
+    "transpose_semitones": 1,
+    "target": "C major",
+    "reason": "key normalization disabled via CLI"
+  },
+  "cleanup": {
+    "applied": false
+  },
+  "output": {
+    "midi": "data/midi/Wakey/Wakey.mid"
+  }
+}
