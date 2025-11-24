@@ -1,18 +1,27 @@
-.PHONY: help setup run run-normalize review export clean-stems clean-midi clean-manifests clean-all process-file
+.PHONY: help setup run run-normalize run-stems run-drum-stems review export clean-stems clean-midi clean-manifests clean-all process-file process-stem process-drum-stem
 
 # Default target: show help
 help:
 	@echo "AI MIDI Pipeline - Available targets:"
 	@echo ""
 	@echo "  make setup              - Create uv environment and install dependencies"
+	@echo ""
+	@echo "FULL PIPELINE (separation + transcription + assembly):"
 	@echo "  make run                - Process all files in data/raw/*.wav (no key normalization)"
 	@echo "  make run-normalize      - Process all files with key normalization to C/Am"
+	@echo "  make process-file FILE=<path>           - Process a single audio file"
+	@echo "  make process-file-norm FILE=<path>      - Process a single file with key normalization"
+	@echo ""
+	@echo "STEM-TO-MIDI (direct conversion, no separation):"
+	@echo "  make run-stems PATTERN=<glob>           - Convert stems to MIDI with Basic Pitch"
+	@echo "  make run-drum-stems PATTERN=<glob>      - Convert drum stems to MIDI with ADTOF"
+	@echo "  make process-stem FILE=<path>           - Convert single stem with Basic Pitch"
+	@echo "  make process-drum-stem FILE=<path>      - Convert single drum stem with ADTOF"
+	@echo ""
+	@echo "OTHER:"
 	@echo "  make review             - Open review UI for low-confidence items"
 	@echo "  make export             - Export all final MIDIs to out_midis/"
 	@echo "  make export OUT=<dir>   - Export all final MIDIs to specified directory"
-	@echo ""
-	@echo "  make process-file FILE=<path>           - Process a single audio file"
-	@echo "  make process-file-norm FILE=<path>      - Process a single file with key normalization"
 	@echo ""
 	@echo "  make clean-stems        - Remove all stem separation outputs"
 	@echo "  make clean-midi         - Remove all MIDI outputs"
@@ -66,6 +75,33 @@ process-file-norm:
 	fi
 	@echo "==> Processing $(FILE) with key normalization..."
 	$(PYTHON) pipeline.py run-batch "$(FILE)" --normalize-key
+
+# Stem-to-MIDI conversion (bypasses separation)
+PATTERN ?= data/stems/*.wav
+
+run-stems:
+	@echo "==> Converting stems to MIDI with Basic Pitch ($(PATTERN))..."
+	$(PYTHON) pipeline.py run-batch "$(PATTERN)" --assume-stems
+
+run-drum-stems:
+	@echo "==> Converting drum stems to MIDI with ADTOF ($(PATTERN))..."
+	$(PYTHON) pipeline.py run-batch "$(PATTERN)" --assume-drum-stems
+
+process-stem:
+	@if [ -z "$(FILE)" ]; then \
+		echo "Error: FILE not specified. Usage: make process-stem FILE=path/to/stem.wav"; \
+		exit 1; \
+	fi
+	@echo "==> Converting $(FILE) to MIDI with Basic Pitch..."
+	$(PYTHON) pipeline.py run-batch "$(FILE)" --assume-stems
+
+process-drum-stem:
+	@if [ -z "$(FILE)" ]; then \
+		echo "Error: FILE not specified. Usage: make process-drum-stem FILE=path/to/drums.wav"; \
+		exit 1; \
+	fi
+	@echo "==> Converting $(FILE) to MIDI with ADTOF..."
+	$(PYTHON) pipeline.py run-batch "$(FILE)" --assume-drum-stems
 
 # Clean targets
 clean-stems:

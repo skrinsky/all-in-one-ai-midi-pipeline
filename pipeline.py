@@ -15,6 +15,7 @@ from steps.clean_quantize import gentle_cleanup
 from steps.write_midi import assemble_and_write_midi
 from steps.qc_render import review_pending_items
 from utils.manifest import load_config, read_manifest, write_manifest, song_id_from_path
+import pretty_midi
 
 CFG = load_config("config.yaml")
 
@@ -73,18 +74,91 @@ def process_one(audio_path: str, normalize_key: bool = False):
     return out_mid, manifest_path
 
 
-def cmd_run_batch(pattern: str, normalize_key: bool = False):
+def process_one_stem(audio_path: str, use_drums: bool = False):
+    """
+    Simplified processing: convert a single audio file (stem) to MIDI.
+    Bypasses separation, tempo detection, multi-track assembly.
+
+    Args:
+        audio_path: Path to the audio file (already a stem)
+        use_drums: If True, use ADTOF (drums transcription), else Basic Pitch
+
+    Returns:
+        (output_midi_path, manifest_path)
+    """
+    sid = song_id_from_path(audio_path)
+    os.makedirs(f"data/midi/{sid}", exist_ok=True)
+    manifest_path = f"manifests/{sid}.json"
+    manifest = read_manifest(manifest_path)
+    manifest.setdefault("song_id", sid)
+    manifest.setdefault("source_audio", audio_path)
+    manifest.setdefault("processing_mode", "stem_only")
+
+    # For Basic Pitch, we need a minimal tempo in manifest
+    if not use_drums:
+        manifest.setdefault("meter_key", {}).setdefault("tempo", 120.0)
+
+    write_manifest(manifest_path, manifest)
+
+    # Transcribe the single stem
+    if use_drums:
+        # Use ADTOF for drum transcription
+        instrument = transcribe_drums_to_midi(audio_path, CFG, manifest)
+        if instrument is None:
+            raise ValueError(f"Drum transcription failed for {audio_path}")
+    else:
+        # Use Basic Pitch for pitched transcription
+        from steps.transcribe_melodic import _bp_predict_events, _events_to_instrument
+
+        try:
+            events = _bp_predict_events(audio_path, manifest)
+            if not events:
+                raise ValueError(f"No notes detected in {audio_path}")
+            instrument = _events_to_instrument(events, program=0, name=os.path.basename(audio_path))
+        except Exception as e:
+            manifest.setdefault("transcription", {})["error"] = str(e)
+            write_manifest(manifest_path, manifest)
+            raise
+
+    write_manifest(manifest_path, manifest)
+
+    # Create MIDI file with single track
+    pm = pretty_midi.PrettyMIDI()
+    pm.instruments.append(instrument)
+
+    out_mid = f"data/midi/{sid}/{sid}.mid"
+    pm.write(out_mid)
+
+    manifest["output_midi"] = out_mid
+    write_manifest(manifest_path, manifest)
+
+    return out_mid, manifest_path
+
+
+def cmd_run_batch(pattern: str, normalize_key: bool = False, assume_stems: bool = False, assume_drum_stems: bool = False):
     files = sorted(glob.glob(pattern))
     if not files:
         print(f"No files match: {pattern}")
         return 1
 
-    for f in tqdm(files, desc="Processing files"):
-        try:
-            out_mid, mani = process_one(f, normalize_key=normalize_key)
-            print(f"[OK] {f} -> {out_mid}  (manifest: {mani})")
-        except Exception as e:
-            print(f"[ERR] {f}: {e}")
+    # Determine processing mode
+    if assume_stems or assume_drum_stems:
+        # Simplified stem-to-MIDI processing
+        use_drums = assume_drum_stems
+        for f in tqdm(files, desc="Processing stems"):
+            try:
+                out_mid, mani = process_one_stem(f, use_drums=use_drums)
+                print(f"[OK] {f} -> {out_mid}  (manifest: {mani})")
+            except Exception as e:
+                print(f"[ERR] {f}: {e}")
+    else:
+        # Full pipeline processing
+        for f in tqdm(files, desc="Processing files"):
+            try:
+                out_mid, mani = process_one(f, normalize_key=normalize_key)
+                print(f"[OK] {f} -> {out_mid}  (manifest: {mani})")
+            except Exception as e:
+                print(f"[ERR] {f}: {e}")
     return 0
 
 
@@ -115,6 +189,16 @@ def main():
         action="store_true",
         help="Normalize pitched tracks to Cmaj/Amin",
     )
+    r.add_argument(
+        "--assume-stems",
+        action="store_true",
+        help="Skip separation; convert each .wav directly to MIDI using Basic Pitch",
+    )
+    r.add_argument(
+        "--assume-drum-stems",
+        action="store_true",
+        help="Skip separation; convert each .wav directly to MIDI using ADTOF (drums)",
+    )
 
     # review-pending
     sub.add_parser(
@@ -132,7 +216,12 @@ def main():
     args = ap.parse_args()
 
     if args.cmd == "run-batch":
-        return cmd_run_batch(args.pattern, normalize_key=args.normalize_key)
+        return cmd_run_batch(
+            args.pattern,
+            normalize_key=args.normalize_key,
+            assume_stems=args.assume_stems,
+            assume_drum_stems=args.assume_drum_stems,
+        )
     elif args.cmd == "review-pending":
         return cmd_review_pending()
     elif args.cmd == "export-midi":
