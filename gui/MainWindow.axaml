@@ -1,0 +1,284 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="AiMidiGui.MainWindow"
+        Width="980"
+        Height="680"
+        Title="AI MIDI Pipeline"
+        Background="#101014"
+        Foreground="#F5F5F5">
+
+    <Grid RowDefinitions="Auto,*,Auto" Margin="12">
+        <!-- TOP HEADER BAR -->
+        <Border Grid.Row="0"
+                CornerRadius="8"
+                Background="#191922"
+                BorderBrush="#303040"
+                BorderThickness="1"
+                Padding="10"
+                Margin="0,0,0,8">
+            <Grid ColumnDefinitions="Auto,* ,Auto" VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Border Width="28" Height="28"
+                            CornerRadius="6"
+                            Background="#3F7FFF"
+                            VerticalAlignment="Center">
+                        <TextBlock Text="🎚"
+                                   FontSize="18"
+                                   VerticalAlignment="Center"
+                                   HorizontalAlignment="Center"/>
+                    </Border>
+                    <StackPanel>
+                        <TextBlock Text="AI MIDI Pipeline"
+                                   FontSize="18"
+                                   FontWeight="Bold" />
+                        <TextBlock Text="Stereo in → stems → tempo/meter → MIDI"
+                                   Opacity="0.7"
+                                   FontSize="11"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Center"
+                            Spacing="16">
+                    <StackPanel>
+                        <TextBlock Text="Python"
+                                   FontSize="11"
+                                   Opacity="0.7"/>
+                        <TextBlock Text="{Binding ElementName=PythonPathTextBox, Path=Text}"
+                                   FontSize="11"
+                                   TextTrimming="CharacterEllipsis"
+                                   MaxWidth="260"
+                                   Opacity="0.9"/>
+                    </StackPanel>
+
+                    <StackPanel>
+                        <TextBlock Text="Repo"
+                                   FontSize="11"
+                                   Opacity="0.7"/>
+                        <TextBlock Text="{Binding ElementName=RepoRootTextBox, Path=Text}"
+                                   FontSize="11"
+                                   TextTrimming="CharacterEllipsis"
+                                   MaxWidth="260"
+                                   Opacity="0.9"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center"
+                            Spacing="4">
+                    <TextBlock x:Name="StatusTextBlock"
+                               Text="Idle"
+                               FontSize="11"
+                               HorizontalAlignment="Right"
+                               Opacity="0.9"/>
+                    <ProgressBar x:Name="BusyProgressBar"
+                                 Width="180"
+                                 Height="6"
+                                 IsVisible="False"
+                                 IsIndeterminate="True"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- MAIN AREA -->
+        <Grid Grid.Row="1" ColumnDefinitions="*, 1.2*" ColumnSpacing="10">
+            <!-- LEFT COLUMN: CONFIG + BUTTONS -->
+            <StackPanel Spacing="10">
+                <!-- ENVIRONMENT CARD -->
+                <Border CornerRadius="8"
+                        Background="#191922"
+                        BorderBrush="#303040"
+                        BorderThickness="1"
+                        Padding="10">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="Environment"
+                                   FontSize="14"
+                                   FontWeight="Bold"/>
+                        <Separator Opacity="0.5"/>
+
+                        <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,2,0,4">
+                            <TextBlock Text="Python executable:"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,8,0"
+                                       FontSize="12"/>
+                            <TextBox x:Name="PythonPathTextBox"
+                                     Grid.Column="1"
+                                     FontSize="12"
+                                     Text="/home/interplain/Dev/all-in-one-ai-midi-pipeline/.venv-ai-midi/bin/python" />
+                            <Button x:Name="BrowsePythonButton"
+                                    Grid.Column="2"
+                                    Margin="6,0,0,0"
+                                    Content="Browse…"
+                                    FontSize="11"
+                                    Padding="8,4"/>
+                        </Grid>
+
+                        <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,2,0,0">
+                            <TextBlock Text="Repo root:"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,8,0"
+                                       FontSize="12"/>
+                            <TextBox x:Name="RepoRootTextBox"
+                                     Grid.Column="1"
+                                     FontSize="12"
+                                     Text="/home/interplain/Dev/all-in-one-ai-midi-pipeline" />
+                            <Button x:Name="BrowseRepoButton"
+                                    Grid.Column="2"
+                                    Margin="6,0,0,0"
+                                    Content="Browse…"
+                                    FontSize="11"
+                                    Padding="8,4"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- INPUT / EXPORT CARD -->
+                <Border CornerRadius="8"
+                        Background="#191922"
+                        BorderBrush="#303040"
+                        BorderThickness="1"
+                        Padding="10">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="Input &amp; Export"
+                                   FontSize="14"
+                                   FontWeight="Bold"/>
+
+
+                        <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,2,0,4">
+                            <TextBlock Text="Raw audio folder:"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,8,0"
+                                       FontSize="12"/>
+                            <TextBox x:Name="RawFolderTextBox"
+                                     Grid.Column="1"
+                                     FontSize="12"
+                                     Text="data/raw" />
+                            <Button x:Name="BrowseRawButton"
+                                    Grid.Column="2"
+                                    Margin="6,0,0,0"
+                                    Content="Browse…"
+                                    FontSize="11"
+                                    Padding="8,4"/>
+                        </Grid>
+
+                        <CheckBox x:Name="NormalizeKeyCheckBox"
+                                  Content="Normalize key to C major / A minor (--normalize-key)"
+                                  Margin="0,0,0,4"
+                                  FontSize="12"/>
+
+                        <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,4,0,0">
+                            <TextBlock Text="Export folder:"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,8,0"
+                                       FontSize="12"/>
+                            <TextBox x:Name="ExportFolderTextBox"
+                                     Grid.Column="1"
+                                     FontSize="12"
+                                     Text="out_midis" />
+                            <Button x:Name="BrowseExportButton"
+                                    Grid.Column="2"
+                                    Margin="6,0,0,0"
+                                    Content="Browse…"
+                                    FontSize="11"
+                                    Padding="8,4"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- ACTION BUTTONS CARD -->
+                <Border CornerRadius="8"
+                        Background="#191922"
+                        BorderBrush="#303040"
+                        BorderThickness="1"
+                        Padding="10">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="Actions"
+                                   FontSize="14"
+                                   FontWeight="Bold"/>
+                        <Separator Opacity="0.5"/>
+
+                        <StackPanel Orientation="Horizontal"
+                                    Spacing="8">
+                            <Button x:Name="RunBatchButton"
+                                    Content="▶ Run Batch"
+                                    Width="120"
+                                    Height="34"
+                                    Background="#3F7FFF"
+                                    BorderBrush="#3F7FFF"
+                                    Foreground="White"
+                                    FontWeight="SemiBold"/>
+                            <Button x:Name="ReviewPendingButton"
+                                    Content="🔍 Review Pending"
+                                    Width="150"
+                                    Height="34"
+                                    FontSize="12"/>
+                            <Button x:Name="ExportMidiButton"
+                                    Content="🎵 Export MIDI"
+                                    Width="120"
+                                    Height="34"
+                                    FontSize="12"/>
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal"
+                                    HorizontalAlignment="Right"
+                                    Spacing="8"
+                                    Margin="0,4,0,0">
+                            <Button x:Name="ClearLogButton"
+                                    Content="Clear log"
+                                    Width="90"
+                                    Height="26"
+                                    FontSize="11"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <!-- RIGHT COLUMN: LOG -->
+            <Border Grid.Column="1"
+                    CornerRadius="8"
+                    Background="#050508"
+                    BorderBrush="#303040"
+                    BorderThickness="1"
+                    Padding="8">
+                <Grid RowDefinitions="Auto,*">
+                    <StackPanel Orientation="Horizontal"
+                                Spacing="8"
+                                Margin="2,0,2,4">
+                        <TextBlock Text="Pipeline Log"
+                                   FontSize="14"
+                                   FontWeight="Bold"/>
+                        <TextBlock Text="(stdout / stderr)"
+                                   FontSize="11"
+                                   Opacity="0.6"
+                                   VerticalAlignment="Bottom"/>
+                    </StackPanel>
+                    <Border Grid.Row="1"
+                            CornerRadius="4"
+                            BorderBrush="#202030"
+                            BorderThickness="1">
+                        <ScrollViewer>
+                            <TextBox x:Name="LogTextBox"
+                                     Margin="4"
+                                     AcceptsReturn="True"
+                                     IsReadOnly="True"
+                                     TextWrapping="NoWrap"
+                                     FontFamily="monospace"
+                                     FontSize="11"
+                                     Background="#050508"
+                                     BorderThickness="0"/>
+                        </ScrollViewer>
+                    </Border>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- FOOTER TIP -->
+        <TextBlock Grid.Row="2"
+                   Text="Tip: drop .wav files into the raw folder, then click ▶ Run Batch. Export MIDI collects everything into your export folder."
+                   Opacity="0.6"
+                   Margin="4,8,4,0"
+                   FontSize="11" />
+    </Grid>
+</Window>

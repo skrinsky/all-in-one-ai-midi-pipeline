@@ -35,3 +35,8 @@ data/models/
 
 # Manifests can be kept or regenerated
 #manifests/
+
+# --- local pipeline outputs (do not commit) ---
+manifests/
+out_midis/
+data/
