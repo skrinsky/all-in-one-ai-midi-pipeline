@@ -134,58 +134,87 @@
                     </StackPanel>
                 </Border>
 
-                <!-- INPUT / EXPORT CARD -->
-                <Border CornerRadius="8"
-                        Background="#191922"
-                        BorderBrush="#303040"
-                        BorderThickness="1"
-                        Padding="10">
-                    <StackPanel Spacing="8">
-                        <TextBlock Text="Input &amp; Export"
-                                   FontSize="14"
-                                   FontWeight="Bold"/>
+             
 
 
-                        <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,2,0,4">
-                            <TextBlock Text="Raw audio folder:"
-                                       VerticalAlignment="Center"
-                                       Margin="0,0,8,0"
-                                       FontSize="12"/>
-                            <TextBox x:Name="RawFolderTextBox"
-                                     Grid.Column="1"
-                                     FontSize="12"
-                                     Text="data/raw" />
-                            <Button x:Name="BrowseRawButton"
-                                    Grid.Column="2"
-                                    Margin="6,0,0,0"
-                                    Content="Browse…"
-                                    FontSize="11"
-                                    Padding="8,4"/>
-                        </Grid>
+                
+               <!-- INPUT / EXPORT CARD -->
+<Border CornerRadius="8"
+        Background="#191922"
+        BorderBrush="#303040"
+        BorderThickness="1"
+        Padding="10">
+    <StackPanel Spacing="8">
+        <TextBlock Text="Input &amp; Export"
+                   FontSize="14"
+                   FontWeight="Bold"/>
 
-                        <CheckBox x:Name="NormalizeKeyCheckBox"
-                                  Content="Normalize key to C major / A minor (--normalize-key)"
-                                  Margin="0,0,0,4"
-                                  FontSize="12"/>
+        <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,2,0,4">
+            <TextBlock Text="Raw audio folder:"
+                       VerticalAlignment="Center"
+                       Margin="0,0,8,0"
+                       FontSize="12"/>
+            <TextBox x:Name="RawFolderTextBox"
+                     Grid.Column="1"
+                     FontSize="12"
+                     Text="data/raw" />
+            <Button x:Name="BrowseRawButton"
+                    Grid.Column="2"
+                    Margin="6,0,0,0"
+                    Content="Browse…"
+                    FontSize="11"
+                    Padding="8,4"/>
+        </Grid>
 
-                        <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,4,0,0">
-                            <TextBlock Text="Export folder:"
-                                       VerticalAlignment="Center"
-                                       Margin="0,0,8,0"
-                                       FontSize="12"/>
-                            <TextBox x:Name="ExportFolderTextBox"
-                                     Grid.Column="1"
-                                     FontSize="12"
-                                     Text="out_midis" />
-                            <Button x:Name="BrowseExportButton"
-                                    Grid.Column="2"
-                                    Margin="6,0,0,0"
-                                    Content="Browse…"
-                                    FontSize="11"
-                                    Padding="8,4"/>
-                        </Grid>
-                    </StackPanel>
-                </Border>
+        <CheckBox x:Name="NormalizeKeyCheckBox"
+                  Content="Normalize key to C major / A minor (--normalize-key)"
+                  Margin="0,0,0,4"
+                  FontSize="12"/>
+
+        <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,4,0,0">
+            <TextBlock Text="Export folder:"
+                       VerticalAlignment="Center"
+                       Margin="0,0,8,0"
+                       FontSize="12"/>
+            <TextBox x:Name="ExportFolderTextBox"
+                     Grid.Column="1"
+                     FontSize="12"
+                     Text="out_midis" />
+            <Button x:Name="BrowseExportButton"
+                    Grid.Column="2"
+                    Margin="6,0,0,0"
+                    Content="Browse…"
+                    FontSize="11"
+                    Padding="8,4"/>
+        </Grid>
+
+        <!-- ✅ split options belong INSIDE this card -->
+        <CheckBox x:Name="SplitTracksCheckBox"
+                  Content="Also export per-track MIDIs (drums/bass/etc)"
+                  Margin="0,8,0,0"
+                  FontSize="12"/>
+
+        <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,4,0,0">
+            <TextBlock Text="Split export folder:"
+                       VerticalAlignment="Center"
+                       Margin="0,0,8,0"
+                       FontSize="12"/>
+            <TextBox x:Name="SplitExportFolderTextBox"
+                     Grid.Column="1"
+                     FontSize="12"
+                     Text="out_midis_split" />
+            <Button x:Name="BrowseSplitExportButton"
+                    Grid.Column="2"
+                    Margin="6,0,0,0"
+                    Content="Browse…"
+                    FontSize="11"
+                    Padding="8,4"/>
+        </Grid>
+    </StackPanel>
+</Border>
+
+                
+         
 
                 <!-- ACTION BUTTONS CARD -->
                 <Border CornerRadius="8"
@@ -202,7 +231,7 @@
                         <StackPanel Orientation="Horizontal"
                                     Spacing="8">
                             <Button x:Name="RunBatchButton"
-                                    Content="▶ Run Batch"
+                                    Content="▶ Convert"
                                     Width="120"
                                     Height="34"
                                     Background="#3F7FFF"
@@ -276,7 +305,7 @@
 
         <!-- FOOTER TIP -->
         <TextBlock Grid.Row="2"
-                   Text="Tip: drop .wav files into the raw folder, then click ▶ Run Batch. Export MIDI collects everything into your export folder."
+                   Text="Tip: drop .wav files into the raw folder, then click ▶ Convert Batch. Export MIDI collects everything into your export folder."
                    Opacity="0.6"
                    Margin="4,8,4,0"
                    FontSize="11" />

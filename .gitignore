@@ -40,3 +40,9 @@ data/models/
 manifests/
 out_midis/
 data/
+
+# Avalonia / Rider GUI artifacts
+gui/.idea/
+gui/Folder.DotSettings.user
+gui/bin/
+gui/obj/

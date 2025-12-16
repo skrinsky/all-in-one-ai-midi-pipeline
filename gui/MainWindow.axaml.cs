@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Avalonia.Controls;
@@ -12,29 +13,32 @@ namespace AiMidiGui;
 public partial class MainWindow : Window
 {
     private bool _isBusy;
-
+    private bool _hasRunBatch = false;   // ✅ ADD THIS LINE
     public MainWindow()
     {
         InitializeComponent();
 
-        // Wire up buttons
+        // Actions
         RunBatchButton.Click += RunBatchButton_OnClick;
         ReviewPendingButton.Click += ReviewPendingButton_OnClick;
         ExportMidiButton.Click += ExportMidiButton_OnClick;
+        ClearLogButton.Click += ClearLogButton_OnClick;
 
+        // Browse buttons
         BrowsePythonButton.Click += BrowsePythonButton_OnClick;
         BrowseRepoButton.Click += BrowseRepoButton_OnClick;
         BrowseRawButton.Click += BrowseRawButton_OnClick;
         BrowseExportButton.Click += BrowseExportButton_OnClick;
 
-        ClearLogButton.Click += ClearLogButton_OnClick;
+        // ✅ You added this in XAML, so you MUST wire it too:
+        BrowseSplitExportButton.Click += BrowseSplitExportButton_OnClick;
+        ExportMidiButton.IsEnabled = false;
 
         StatusTextBlock.Text = "Idle";
     }
-    
-
 
     // ---------------------- Button handlers ----------------------
+
     private void ClearLogButton_OnClick(object? sender, RoutedEventArgs e)
     {
         ClearLog();
@@ -73,6 +77,10 @@ public partial class MainWindow : Window
             args += " --normalize-key";
 
         await RunProcessAsync(pythonExe, args, repoRoot, "run-batch");
+        
+        _hasRunBatch = true;
+        ExportMidiButton.IsEnabled = true;
+        AppendLog("\n✔ Batch complete — Export MIDI is now enabled.\n");
     }
 
     private async void ReviewPendingButton_OnClick(object? sender, RoutedEventArgs e)
@@ -98,32 +106,81 @@ public partial class MainWindow : Window
 
     private async void ExportMidiButton_OnClick(object? sender, RoutedEventArgs e)
     {
-        if (_isBusy) return;
+        if (!_hasRunBatch)
+        {
+            AppendLog("ERROR: Run Batch must be completed before exporting MIDI.\n");
+            return;
+        }
+        
+        if (_isBusy)
+        {
+            AppendLog("[WARN] Busy – export ignored.\n");
+            return;
+        }
 
         ClearLog();
+        AppendLog("Export MIDI clicked.\n");
         SetBusy("Running: export-midi …");
 
         string pythonExe = PythonPathTextBox.Text?.Trim() ?? "";
         string repoRoot = RepoRootTextBox.Text?.Trim() ?? "";
         string exportFolder = ExportFolderTextBox.Text?.Trim() ?? "out_midis";
 
-        if (!File.Exists(pythonExe) || !Directory.Exists(repoRoot))
+        if (!File.Exists(pythonExe))
         {
-            AppendLog("ERROR: Check Python path and repo root.\n");
+            AppendLog($"ERROR: Python not found: {pythonExe}\n");
             ClearBusy("Idle (error)");
             return;
         }
 
-        // Make sure export folder exists (relative to repo root)
+        if (!Directory.Exists(repoRoot))
+        {
+            AppendLog($"ERROR: Repo root not found: {repoRoot}\n");
+            ClearBusy("Idle (error)");
+            return;
+        }
+
+        // Export folder (absolute path for scanning, but CLI arg can be relative)
         string fullExportPath = Path.IsPathRooted(exportFolder)
             ? exportFolder
             : Path.Combine(repoRoot, exportFolder);
 
         Directory.CreateDirectory(fullExportPath);
 
+        // 1) Export combined MIDIs
         string args = $"pipeline.py export-midi --out \"{exportFolder}\"";
         await RunProcessAsync(pythonExe, args, repoRoot, "export-midi");
+
+        // If nothing exists, tell you clearly (otherwise it looks like "did nothing")
+        var exported = Directory.EnumerateFiles(fullExportPath, "*.mid", SearchOption.TopDirectoryOnly).ToList();
+        if (exported.Count == 0)
+        {
+            AppendLog($"[WARN] No .mid files found in export folder: {fullExportPath}\n");
+            ClearBusy("Idle");
+            return;
+        }
+
+        // 2) Optional: split each exported MIDI into per-track MIDIs
+        bool doSplit = SplitTracksCheckBox.IsChecked ?? false;
+        if (doSplit)
+        {
+            string splitFolder = SplitExportFolderTextBox.Text?.Trim() ?? "out_midis_split";
+
+            string fullSplitPath = Path.IsPathRooted(splitFolder)
+                ? splitFolder
+                : Path.Combine(repoRoot, splitFolder);
+
+            Directory.CreateDirectory(fullSplitPath);
+
+            AppendLog("\n--- Splitting exported MIDIs into per-track files ---\n");
+            await SplitAllExportedMidisAsync(pythonExe, repoRoot, fullExportPath, fullSplitPath);
+        }
+
+        ClearBusy("Idle");
     }
+
+
+
 
     // ---------------------- Browse buttons ----------------------
 
@@ -166,7 +223,6 @@ public partial class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(repoRoot) &&
                 result.StartsWith(repoRoot, StringComparison.Ordinal))
             {
-                // Store relative to repo root if possible
                 RawFolderTextBox.Text = result.Substring(repoRoot.Length).TrimStart(Path.DirectorySeparatorChar);
             }
             else
@@ -200,89 +256,104 @@ public partial class MainWindow : Window
         }
     }
 
-    // ---------------------- Process runner ----------------------
-
-   private async Task RunProcessAsync(string fileName, string arguments, string workingDirectory, string label)
-{
-    AppendLog($"> {fileName} {arguments}\n\n");
-
-    var psi = new ProcessStartInfo
+    // ✅ new browse for split folder
+    private async void BrowseSplitExportButton_OnClick(object? sender, RoutedEventArgs e)
     {
-        FileName = fileName,
-        Arguments = arguments,
-        WorkingDirectory = workingDirectory,
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        UseShellExecute = false,
-        CreateNoWindow = true,
-        StandardOutputEncoding = Encoding.UTF8,
-        StandardErrorEncoding = Encoding.UTF8
-    };
-
-    // 🔧 Make sure any inner "python -m demucs.separate" calls
-    // use the SAME venv python by putting its bin folder at the
-    // front of PATH.
-    try
-    {
-        var pythonDir = Path.GetDirectoryName(fileName);
-        if (!string.IsNullOrEmpty(pythonDir))
+        var dlg = new OpenFolderDialog
         {
-            var existingPath = psi.EnvironmentVariables["PATH"];
-            if (string.IsNullOrEmpty(existingPath))
+            Title = "Select split export folder (or parent)"
+        };
+
+        var result = await dlg.ShowAsync(this);
+        if (!string.IsNullOrWhiteSpace(result))
+        {
+            string repoRoot = RepoRootTextBox.Text?.Trim() ?? "";
+            if (!string.IsNullOrWhiteSpace(repoRoot) &&
+                result.StartsWith(repoRoot, StringComparison.Ordinal))
             {
-                psi.EnvironmentVariables["PATH"] = pythonDir;
+                SplitExportFolderTextBox.Text =
+                    result.Substring(repoRoot.Length).TrimStart(Path.DirectorySeparatorChar);
             }
             else
             {
-                psi.EnvironmentVariables["PATH"] =
-                    pythonDir + Path.PathSeparator + existingPath;
-            }
-
-            // Optional: advertise the virtual env to Python code
-            var venvRoot = Directory.GetParent(pythonDir)?.FullName;
-            if (!string.IsNullOrEmpty(venvRoot))
-            {
-                psi.EnvironmentVariables["VIRTUAL_ENV"] = venvRoot;
+                SplitExportFolderTextBox.Text = result;
             }
         }
     }
-    catch (Exception ex)
+
+
+
+    // ---------------------- Process runner ----------------------
+
+    private async Task RunProcessAsync(string fileName, string arguments, string workingDirectory, string label)
     {
-        AppendLog($"[WARN] Failed to adjust PATH for venv: {ex.Message}\n");
+        AppendLog($"> {fileName} {arguments}\n\n");
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = fileName,
+            Arguments = arguments,
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
+        };
+
+        // Ensure inner python calls use same venv
+        try
+        {
+            var pythonDir = Path.GetDirectoryName(fileName);
+            if (!string.IsNullOrEmpty(pythonDir))
+            {
+                var existingPath = psi.EnvironmentVariables["PATH"];
+                psi.EnvironmentVariables["PATH"] = string.IsNullOrEmpty(existingPath)
+                    ? pythonDir
+                    : pythonDir + Path.PathSeparator + existingPath;
+
+                var venvRoot = Directory.GetParent(pythonDir)?.FullName;
+                if (!string.IsNullOrEmpty(venvRoot))
+                    psi.EnvironmentVariables["VIRTUAL_ENV"] = venvRoot;
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"[WARN] Failed to adjust PATH for venv: {ex.Message}\n");
+        }
+
+        using var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
+
+        process.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data != null)
+                AppendLog(e.Data + "\n");
+        };
+
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data != null)
+                AppendLog("[ERR] " + e.Data + "\n");
+        };
+
+        try
+        {
+            process.Start();
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
+            await Task.Run(process.WaitForExit);
+
+            AppendLog($"\nProcess exited with code {process.ExitCode}\n");
+            ClearBusy($"Finished: {label} (exit {process.ExitCode})");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"\nEXCEPTION: {ex.Message}\n");
+            ClearBusy("Idle (exception)");
+        }
     }
-
-    using var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
-
-    process.OutputDataReceived += (_, e) =>
-    {
-        if (e.Data != null)
-            AppendLog(e.Data + "\n");
-    };
-
-    process.ErrorDataReceived += (_, e) =>
-    {
-        if (e.Data != null)
-            AppendLog("[ERR] " + e.Data + "\n");
-    };
-
-    try
-    {
-        process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
-        await Task.Run(process.WaitForExit);
-
-        AppendLog($"\nProcess exited with code {process.ExitCode}\n");
-        ClearBusy($"Finished: {label} (exit {process.ExitCode})");
-    }
-    catch (Exception ex)
-    {
-        AppendLog($"\nEXCEPTION: {ex.Message}\n");
-        ClearBusy("Idle (exception)");
-    }
-}
-
 
     // ---------------------- UI helpers ----------------------
 
@@ -293,40 +364,12 @@ public partial class MainWindow : Window
             var stamp = DateTime.Now.ToString("HH:mm:ss ");
             LogTextBox.Text += stamp + text;
 
-            // Move caret to the end so the newest text is the “active” point
             if (!string.IsNullOrEmpty(LogTextBox.Text))
             {
                 LogTextBox.CaretIndex = LogTextBox.Text.Length;
-                // Avalonia will keep the caret in view without ScrollToEnd()
             }
         });
     }
-
-
-    private async Task RunPipelineAsync(string args, string label)
-    {
-        SetBusy($"Running: {label}");
-
-        RunBatchButton.IsEnabled = false;
-        ReviewPendingButton.IsEnabled = false;
-        ExportMidiButton.IsEnabled = false;
-
-        try
-        {
-            await RunProcessAsync(
-                PythonPathTextBox.Text,
-                args,
-                RepoRootTextBox.Text,
-                label);
-        }
-        finally
-        {
-            RunBatchButton.IsEnabled = true;
-            ReviewPendingButton.IsEnabled = true;
-            ExportMidiButton.IsEnabled = true;
-        }
-    }
-
 
     private void ClearLog()
     {
@@ -347,6 +390,8 @@ public partial class MainWindow : Window
         BrowseRepoButton.IsEnabled = false;
         BrowseRawButton.IsEnabled = false;
         BrowseExportButton.IsEnabled = false;
+        BrowseSplitExportButton.IsEnabled = false; // ✅ new
+
     }
 
     private void ClearBusy(string status)
@@ -363,6 +408,34 @@ public partial class MainWindow : Window
         BrowseRepoButton.IsEnabled = true;
         BrowseRawButton.IsEnabled = true;
         BrowseExportButton.IsEnabled = true;
+        BrowseSplitExportButton.IsEnabled = true; // ✅ new
+        ExportMidiButton.IsEnabled = _hasRunBatch;
+
+    }
+
+    // ---------------------- MIDI splitting ----------------------
+
+    private async Task SplitAllExportedMidisAsync(string pythonExe, string repoRoot, string combinedExportDir,
+        string splitOutDir)
+    {
+        var midis = Directory.EnumerateFiles(combinedExportDir, "*.mid", SearchOption.TopDirectoryOnly).ToList();
+        if (midis.Count == 0)
+        {
+            AppendLog($"[WARN] No .mid files found in: {combinedExportDir}\n");
+            return;
+        }
+
+        foreach (var midi in midis)
+        {
+            var baseName = Path.GetFileNameWithoutExtension(midi);
+            var songOut = Path.Combine(splitOutDir, baseName);
+
+            Directory.CreateDirectory(songOut);
+
+            var args = $"utils/split_midi_tracks.py \"{midi}\" --out \"{songOut}\"";
+            await RunProcessAsync(pythonExe, args, repoRoot, "split-midi-tracks");
+        }
     }
 }
+
 
