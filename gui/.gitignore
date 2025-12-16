@@ -1,0 +1,6 @@
+**/bin/
+**/obj/
+.vs/
+# JetBrains Rider / IDE files
+.idea/
+*.DotSettings.user
