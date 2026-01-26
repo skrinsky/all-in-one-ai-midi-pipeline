@@ -34,3 +34,7 @@ gradio>=4.0.0
 # Optional extras (documented, not required for basic use):
 # basic-pitch[tf]     # if you want TensorFlow SavedModel support as well
 # madmom==0.16.1      # if you want madmom beat/downbeat functions
+
+# Optional: CREPE F0 tracking (used for bass cleanup; code falls back if missing)
+torchcrepe==0.0.24
+

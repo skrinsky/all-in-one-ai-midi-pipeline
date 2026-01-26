@@ -3,6 +3,17 @@ import pretty_midi
 import numpy as np
 from utils.audio_utils import load_audio_mono
 
+# NEW: TorchCREPE for F0 tracking
+try:
+    import torchcrepe
+    import torch
+    HAS_TORCHCREPE = True
+except ImportError:
+    torchcrepe = None
+    torch = None
+    HAS_TORCHCREPE = False
+
+import librosa
 
 from basic_pitch.inference import predict, Model
 from basic_pitch import ICASSP_2022_MODEL_PATH
@@ -262,6 +273,279 @@ def _split_lead_harmony(events):
 
     return lead, harm
 
+# =========================
+# CREPE F0 + F0-guided cleanup
+# =========================
+
+def _hz_to_midi(f_hz: float) -> float:
+    return 69.0 + 12.0 * np.log2(f_hz / 440.0)
+
+
+def _run_crepe_f0(
+    y: np.ndarray,
+    sr: int,
+    step_size_ms: float = 10.0,
+    device: str = "cpu",
+):
+    """
+    Run TorchCREPE and return frame-wise F0: (times, freqs Hz, confidences).
+    Resamples to 16k if needed.
+    """
+    if not HAS_TORCHCREPE:
+        return None, None, None
+
+    target_sr = 16000
+    if sr != target_sr:
+        y = librosa.resample(y, orig_sr=sr, target_sr=target_sr)
+        sr = target_sr
+
+    # (batch, time)
+    audio = torch.from_numpy(y.astype(np.float32)).unsqueeze(0)
+
+    # Make sure the tensor is on the same device TorchCREPE will use
+    if device != "cpu":
+        audio = audio.to(device)
+
+    hop_length = int(round((step_size_ms / 1000.0) * sr))
+    hop_length = max(1, hop_length)
+
+    with torch.inference_mode():
+        f0_hz, periodicity = torchcrepe.predict(
+            audio, sr,
+            hop_length=hop_length,
+            fmin=30.0, fmax=600.0,      # bass range
+            model="tiny",               # faster than "full"
+            batch_size=1024,
+            device=device,
+            return_periodicity=True,
+        )
+
+    f0_hz = f0_hz[0].detach().cpu().numpy()
+    conf = periodicity[0].detach().cpu().numpy()
+    times = (np.arange(len(f0_hz)) * hop_length) / float(sr)
+
+    return times.astype(float), f0_hz.astype(float), conf.astype(float)
+
+def _f0_stats_in_window(f0_times, f0_hz, f0_conf, t0, t1, conf_thresh=0.35):
+    """
+    Returns (midi_median, voiced_ratio, conf_mean) in [t0, t1].
+    voiced_ratio is fraction of frames with conf >= conf_thresh and finite f0.
+    """
+    if f0_times is None or f0_hz is None or f0_conf is None:
+        return None, 0.0, 0.0
+
+    t0 = float(t0); t1 = float(t1)
+    if t1 <= t0:
+        return None, 0.0, 0.0
+
+    i0 = int(np.searchsorted(f0_times, t0, side="left"))
+    i1 = int(np.searchsorted(f0_times, t1, side="right"))
+    i0 = max(0, min(i0, len(f0_times)))
+    i1 = max(i0, min(i1, len(f0_times)))
+
+    if i1 - i0 < 2:
+        return None, 0.0, 0.0
+
+    seg_hz = f0_hz[i0:i1]
+    seg_c  = f0_conf[i0:i1]
+
+    good = (seg_c >= conf_thresh) & np.isfinite(seg_hz) & (seg_hz > 0)
+    voiced_ratio = float(good.mean()) if seg_c.size else 0.0
+    conf_mean = float(np.nanmean(seg_c[good])) if good.any() else float(np.nanmean(seg_c))
+
+    if good.sum() < 1:
+        return None, voiced_ratio, conf_mean
+
+    midi = _hz_to_midi(seg_hz[good])
+    midi_med = float(np.nanmedian(midi))
+    return midi_med, voiced_ratio, conf_mean
+
+
+def _snap_to_nearest_octave(p_bp: int, f0_midi: float) -> int:
+    """
+    Snap BP pitch to nearest octave-equivalent of f0_midi.
+    Useful if BP is octave-wrong but pitch class matches.
+    """
+    if f0_midi is None or np.isnan(f0_midi):
+        return p_bp
+    f0_round = int(round(f0_midi))
+    candidates = [f0_round - 24, f0_round - 12, f0_round, f0_round + 12, f0_round + 24]
+    return min(candidates, key=lambda c: abs(c - p_bp))
+
+def _filter_high_pitch_low_vel(
+    events,
+    pitch_hi=55,            # above this is suspicious for bass (C4=60)
+    vel_max=50,             # only kill if velocity is this low or lower
+    max_dur_s=0.18,         # optional: only kill if the note is shortish
+    keep_if_long=False,      # safety: keep long notes even if quiet/high
+):
+    """
+    Drop bass events that look like spray: very high pitch + very low velocity.
+    Optionally restrict to short durations too.
+
+    This targets the classic "octave jump / harmonic / noise" garbage BP emits.
+    """
+    if not events:
+        return events
+
+    kept = []
+    dropped = 0
+    for s, e, p, v in events:
+        dur = float(e) - float(s)
+        p = int(p)
+        v = int(v)
+
+        suspicious = (p >= pitch_hi) and (v <= vel_max)
+
+        if suspicious:
+            if keep_if_long and dur > max_dur_s:
+                kept.append((s, e, p, v))
+                continue
+            if dur <= max_dur_s:
+                dropped += 1
+                continue
+            # if keep_if_long is False, drop regardless of dur
+            if not keep_if_long:
+                dropped += 1
+                continue
+
+        kept.append((s, e, p, v))
+
+    print(f"[bass] highpitch+lowvel filter: in={len(events)} kept={len(kept)} dropped={dropped}", flush=True)
+    return kept
+
+def _bass_gate_with_crepe(
+    events,
+    f0_times, f0_hz, f0_conf,
+    conf_thresh=0.25,           # threshold for a frame to count as "voiced"
+    voiced_ratio_thresh=0.10,   # (alias) require at least this fraction voiced frames
+    lookahead_s=0.03,           # (alias) skip onset transient before analyzing
+    win_s=0.20,                 # analysis window length (seconds)
+    min_conf_mean=0.12,         # if mean confidence in window is below this, treat CREPE as uninformative
+    min_note_dur_s=0.10,        # when CREPE is uninformative, drop notes shorter than this (spray killer)
+    max_semitone_diff=4.0,      # if CREPE is confident, require BP pitch to agree (after octave snap)
+    do_pitch_snap=True,
+    debug_n=20,
+):
+    """
+    Gate BasicPitch bass events using TorchCREPE.
+
+    Rules:
+    - If CREPE is confident (enough mean conf + enough voiced frames):
+        keep only if BP pitch (optionally octave-snapped) matches CREPE median within tolerance.
+    - If CREPE is NOT confident:
+        do NOT trust it for pitch gating; instead, drop very short notes (spray) and keep longer notes.
+    - Safety: if we somehow keep nothing, return original events.
+    """
+    if (not events) or (f0_times is None) or (f0_hz is None) or (f0_conf is None):
+        return events
+
+    events = sorted(events, key=lambda x: x[0])
+
+    def hz_to_midi(f_hz: float) -> float:
+        return 69.0 + 12.0 * np.log2(f_hz / 440.0)
+
+    def snap_to_nearest_octave(p_bp: int, f0_midi: float) -> int:
+        f0_round = int(round(f0_midi))
+        candidates = [f0_round - 24, f0_round - 12, f0_round, f0_round + 12, f0_round + 24]
+        return min(candidates, key=lambda c: abs(c - p_bp))
+
+    kept = []
+    dropped = 0
+    changed = 0
+
+    for i, (s, e, p_bp, v) in enumerate(events):
+        s = float(s); e = float(e)
+        p_bp = int(p_bp); v = int(v)
+        dur = e - s
+        if dur <= 0:
+            continue
+
+        # Analyze after onset transient
+        t0 = s + float(lookahead_s)
+        t1 = min(e, t0 + float(win_s))
+        if t1 <= t0:
+            # too short to analyze; treat as "uninformative"
+            if dur < min_note_dur_s:
+                dropped += 1
+                if i < debug_n:
+                    print(f"[gate dbg] i={i} dur={dur:.3f} -> DROP (too short, no window)", flush=True)
+                continue
+            kept.append((s, e, p_bp, v))
+            if i < debug_n:
+                print(f"[gate dbg] i={i} dur={dur:.3f} -> KEEP (too short, no window)", flush=True)
+            continue
+
+        i0 = int(np.searchsorted(f0_times, t0, side="left"))
+        i1 = int(np.searchsorted(f0_times, t1, side="right"))
+        i0 = max(0, min(i0, len(f0_times)))
+        i1 = max(i0, min(i1, len(f0_times)))
+
+        if i1 - i0 < 2:
+            # CREPE uninformative
+            if dur < min_note_dur_s:
+                dropped += 1
+                decision = "DROP (crepe sparse + short)"
+            else:
+                kept.append((s, e, p_bp, v))
+                decision = "KEEP (crepe sparse)"
+            if i < debug_n:
+                print(f"[gate dbg] i={i} dur={dur:.3f} {decision}", flush=True)
+            continue
+
+        seg_hz = f0_hz[i0:i1]
+        seg_c  = f0_conf[i0:i1]
+
+        conf_mean = float(np.nanmean(seg_c)) if seg_c.size else 0.0
+        good = (seg_c >= conf_thresh) & np.isfinite(seg_hz) & (seg_hz > 0)
+        voiced_ratio = float(np.mean(good)) if seg_c.size else 0.0
+
+        f0_med = None
+        if np.sum(good) >= 2:
+            f0_med = float(np.nanmedian(hz_to_midi(seg_hz[good])))
+
+        # Debug print
+        if i < debug_n:
+            print(
+                f"[gate dbg] i={i} s={s:.3f} e={e:.3f} dur={dur:.3f} "
+                f"t0={t0:.3f} t1={t1:.3f} f0_med={None if f0_med is None else round(f0_med,2)} "
+                f"vr={voiced_ratio:.2f} conf_mean={conf_mean:.3f} p_bp={p_bp}",
+                flush=True,
+            )
+
+        # Decide whether CREPE is trustworthy in this window
+        crepe_confident = (f0_med is not None) and (conf_mean >= min_conf_mean) and (voiced_ratio >= voiced_ratio_thresh)
+
+        if not crepe_confident:
+            # Don't do pitch gating. Only kill obvious spray (very short notes).
+            if dur < min_note_dur_s:
+                dropped += 1
+                continue
+            kept.append((s, e, p_bp, v))
+            continue
+
+        # CREPE confident: enforce pitch agreement
+        p_out = p_bp
+        if do_pitch_snap:
+            p_out = snap_to_nearest_octave(p_bp, f0_med)
+
+        if abs(p_out - f0_med) <= max_semitone_diff:
+            if p_out != p_bp:
+                changed += 1
+            kept.append((s, e, p_out, v))
+        else:
+            dropped += 1
+
+    kept.sort(key=lambda x: x[0])
+    print(f"[bass gate] in={len(events)} kept={len(kept)} dropped={dropped} changed_pitch={changed}", flush=True)
+
+    # Safety: never return empty unless input was empty
+    if len(kept) == 0:
+        print("[bass gate] kept=0 -> skipping gate (returning original BP events)", flush=True)
+        return events
+
+    return kept
+
 
 def transcribe_pitched_tracks(stems: dict, CFG: dict, manifest: dict):
     """
@@ -324,33 +608,104 @@ def transcribe_pitched_tracks(stems: dict, CFG: dict, manifest: dict):
     b_path = stems.get("bass")
     if b_path and os.path.exists(b_path):
         try:
+            # 1) Basic Pitch bass events
             b_events = _bp_predict_events(b_path, manifest)
 
-            # 1) basic harmonic/junk filter (optional, keep if it helped at all)
-            # from the earlier helper; if you didn't keep it, you can skip this line.
-            # b_events = _filter_bass_events(b_events,
-            #                                min_velocity=30,
-            #                                min_duration=0.04,
-            #                                max_pitch=60)
+            # Clamp to a sane bass range (adjust as you like)
+            BASS_MIN = 28   # ~E1
+            BASS_MAX = 72   # ~C5
+            b_events = [(s, e, p, v) for (s, e, p, v) in b_events if BASS_MIN <= int(p) <= BASS_MAX]
 
-            # 2) NEW: drop notes where the bass stem is effectively silent
+            raw_b_events = list(b_events)  # fallback
+
+            print(f"[bass] HAS_TORCHCREPE={HAS_TORCHCREPE}", flush=True)
+            print(f"[bass] bp events={len(raw_b_events)} stem={b_path}", flush=True)
+
+            # 2) TorchCREPE F0 gate (optional)
+            y_bass, sr_bass = load_audio_mono(b_path)
+            print(
+                f"[bass] y_ok={y_bass is not None} n={0 if y_bass is None else y_bass.size} sr={sr_bass}",
+                flush=True,
+            )
+
+            if y_bass is not None and y_bass.size > 0 and HAS_TORCHCREPE:
+                print("[bass] entering TorchCREPE F0...", flush=True)
+
+                crepe_device = "cpu"
+                if torch is not None:
+                    if torch.backends.mps.is_available():
+                        crepe_device = "mps"
+                    elif torch.cuda.is_available():
+                        crepe_device = "cuda"
+                print(f"[bass] crepe_device={crepe_device}", flush=True)
+
+                try:
+                    f0_times, f0_hz, f0_conf = _run_crepe_f0(
+                        y_bass,
+                        sr_bass,
+                        step_size_ms=20.0,
+                        device=crepe_device,
+                    )
+
+                    before = len(b_events)
+                    b_events = _bass_gate_with_crepe(
+                        b_events,
+                        f0_times, f0_hz, f0_conf,
+                        conf_thresh=0.25,
+                        voiced_ratio_thresh=0.10,
+                        lookahead_s=0.03,
+                        win_s=0.20,
+                        max_semitone_diff=4.0,
+                        do_pitch_snap=True,
+                    )
+                    print(f"[bass gate] {before} -> {len(b_events)} events", flush=True)
+
+                except Exception as fe:
+                    print(f"[bass] TorchCREPE failed ({fe}); falling back to Basic Pitch", flush=True)
+                    b_events = raw_b_events
+
+            # Safety: if gating killed everything, fall back
+            if not b_events and raw_b_events:
+                b_events = raw_b_events
+
+            # 3) Optional: kill high-pitch + low-velocity spray (after gate/fallback, before merge)
+            print(f"[bass] pre-hi/low filter: {len(b_events)}", flush=True)
+            b_events = _filter_high_pitch_low_vel(
+                b_events,
+                pitch_hi=55,     # try 55–62 depending on your material
+                vel_max=50,      # try 25–45
+                max_dur_s=0.18,  # try 0.12–0.25
+                keep_if_long=True,
+            )
+            print(f"[bass] post-hi/low filter: {len(b_events)}", flush=True)
+
+            # 4) Merge micro-chops
+            print(f"[bass] pre-merge: {len(b_events)}", flush=True)
+            b_events = _merge_same_pitch(b_events, max_gap=0.005)
+            print(f"[bass] post-merge: {len(b_events)}", flush=True)
+
+            # 5) Silence filter (last)
             b_events = _filter_bass_silence(
                 b_path,
                 b_events,
-                rms_thresh_db=-45.0,  # raise toward -40 if it's still too generous
-                min_active_ratio=0.2, # require at least 20% of frames to be above threshold
+                rms_thresh_db=-50.0,
+                min_active_ratio=0.1,
             )
+
+            # Final safety fallback if silence filter wipes everything
+            if not b_events and raw_b_events:
+                b_events = _merge_same_pitch(raw_b_events, max_gap=0.08)
 
             if b_events:
                 pitched["bass"] = _events_to_instrument(b_events, program=34, name="bass")
                 status["bass"] = True
             else:
                 status["bass"] = "no_notes_after_filter"
+
         except Exception as e:
             status["bass"] = f"error: {e}"
     else:
         status["bass"] = "missing_stem"
-
 
 
     # ---------- GUITAR ----------
