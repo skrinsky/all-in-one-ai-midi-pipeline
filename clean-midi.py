@@ -147,6 +147,128 @@ def filter_by_pitch(notes: list, pitch_min: int = 0, pitch_max: int = 127) -> li
     return [n for n in notes if pitch_min <= n.pitch <= pitch_max]
 
 
+def quantize_monophonic(notes: list, grid_sec: float) -> list:
+    """
+    Keep only the loudest note per quantization bin.
+
+    Args:
+        notes: List of pretty_midi.Note objects
+        grid_sec: Quantization grid size in seconds (e.g., 0.0625 for 16th at 240 BPM)
+
+    Returns:
+        Filtered list with at most one note per grid bin (the loudest).
+    """
+    if not notes or grid_sec <= 0:
+        return notes
+
+    # Group notes by their grid bin
+    bins: dict[int, list] = {}
+    for n in notes:
+        bin_idx = int(n.start / grid_sec)
+        if bin_idx not in bins:
+            bins[bin_idx] = []
+        bins[bin_idx].append(n)
+
+    # Keep only the loudest note in each bin
+    result = []
+    for bin_notes in bins.values():
+        loudest = max(bin_notes, key=lambda n: n.velocity)
+        result.append(loudest)
+
+    # Sort by start time
+    result.sort(key=lambda n: n.start)
+    return result
+
+
+def count_polyphonic_bins(notes: list, grid_sec: float) -> tuple[int, int, int]:
+    """
+    Count bins with 0, 1, and 2+ notes.
+
+    Returns:
+        (empty_bins, mono_bins, poly_bins)
+    """
+    if not notes or grid_sec <= 0:
+        return 0, 0, 0
+
+    starts = np.array([n.start for n in notes])
+    if len(starts) == 0:
+        return 0, 0, 0
+
+    max_bin = int(starts.max() / grid_sec) + 1
+    bin_indices = (starts / grid_sec).astype(int)
+    bin_counts = np.bincount(bin_indices, minlength=max_bin)
+
+    empty = (bin_counts == 0).sum()
+    mono = (bin_counts == 1).sum()
+    poly = (bin_counts >= 2).sum()
+
+    return int(empty), int(mono), int(poly)
+
+
+def find_monophonic_threshold(
+    notes: list,
+    grid_sec: float,
+    target_poly_pct: float = 1.0,
+) -> int:
+    """
+    Find velocity threshold that achieves target polyphony percentage.
+
+    Args:
+        notes: List of notes to analyze
+        grid_sec: Quantization grid in seconds
+        target_poly_pct: Target percentage of bins with 2+ notes (default 1%)
+
+    Returns:
+        Velocity threshold that achieves near-monophonic output
+    """
+    if not notes:
+        return 64
+
+    velocities = sorted(set(n.velocity for n in notes))
+    if len(velocities) <= 1:
+        return velocities[0] if velocities else 64
+
+    best_thresh = velocities[0]
+    best_poly_pct = 100.0
+
+    for thresh in velocities:
+        filtered = [n for n in notes if n.velocity >= thresh]
+        if not filtered:
+            break
+
+        _, mono, poly = count_polyphonic_bins(filtered, grid_sec)
+        total_active = mono + poly
+        if total_active == 0:
+            break
+
+        poly_pct = 100.0 * poly / total_active
+
+        # Track the threshold closest to target without going under
+        if poly_pct <= target_poly_pct:
+            return thresh
+
+        if poly_pct < best_poly_pct:
+            best_poly_pct = poly_pct
+            best_thresh = thresh
+
+    return best_thresh
+
+
+def grid_from_tempo_and_quantize(tempo: float, quantize: int) -> float:
+    """
+    Compute grid size in seconds from tempo and quantization.
+
+    Args:
+        tempo: Beats per minute
+        quantize: Note value denominator (4=quarter, 8=eighth, 16=sixteenth)
+
+    Returns:
+        Grid size in seconds
+    """
+    beat_sec = 60.0 / tempo
+    return beat_sec * 4.0 / quantize  # 4 because quarter note = 1 beat
+
+
 def print_pitch_histogram(notes: list, title: str = "Pitch histogram") -> None:
     """Print ASCII pitch histogram grouped by octave."""
     if not notes:
@@ -177,10 +299,21 @@ def process_track(
     pitch_min: int,
     pitch_max: int,
     histogram_only: bool,
+    grid_sec: float | None = None,
+    auto_mono: bool = False,
     verbose: bool = True,
 ) -> tuple[int, int]:
     """
-    Process a single track, applying velocity and pitch filtering.
+    Process a single track, applying velocity, pitch, and quantize filtering.
+
+    Args:
+        inst: The instrument/track to process
+        threshold: Manual velocity threshold, or None for auto
+        pitch_min/max: Pitch range filter
+        histogram_only: If True, don't modify notes
+        grid_sec: Quantization grid in seconds (None = no quantize filter)
+        auto_mono: If True, find threshold for monophonic output instead of Otsu
+        verbose: Print progress
 
     Returns (original_count, final_count).
     """
@@ -201,11 +334,23 @@ def process_track(
         v_mean, v_std = velocities.mean(), velocities.std()
         print(f"\n  Velocity range: {v_min}-{v_max}, Mean: {v_mean:.1f}, Std: {v_std:.1f}")
 
+    # Show polyphony stats if quantizing
+    if grid_sec is not None and verbose:
+        empty, mono, poly = count_polyphonic_bins(inst.notes, grid_sec)
+        total_active = mono + poly
+        if total_active > 0:
+            poly_pct = 100.0 * poly / total_active
+            print(f"  Polyphony: {poly} of {total_active} active bins ({poly_pct:.1f}%) have 2+ notes")
+
     # Compute velocity threshold
     if threshold is not None:
         thresh = threshold
         if verbose:
             print(f"  Using manual velocity threshold: {thresh}")
+    elif auto_mono and grid_sec is not None:
+        thresh = find_monophonic_threshold(inst.notes, grid_sec, target_poly_pct=1.0)
+        if verbose:
+            print(f"  Auto-monophonic velocity threshold: {thresh}")
     else:
         thresh = otsu_threshold(velocities)
         if verbose:
@@ -216,10 +361,16 @@ def process_track(
     if histogram_only:
         kept = filter_by_velocity(inst.notes, thresh, keep_above=True)
         kept = filter_by_pitch(kept, pitch_min, pitch_max)
+        if grid_sec is not None:
+            kept = quantize_monophonic(kept, grid_sec)
         dropped = original_count - len(kept)
         if verbose:
             print(f"\n  Would keep {len(kept)} notes, drop {dropped}")
-            print(f"    (velocity >= {thresh}, pitch {pitch_min}-{pitch_max})")
+            desc = f"velocity >= {thresh}, pitch {pitch_min}-{pitch_max}"
+            if grid_sec is not None:
+                print(f"    ({desc}, quantized to {grid_sec*1000:.1f}ms grid)")
+            else:
+                print(f"    ({desc})")
         return original_count, len(kept)
 
     # Filter notes
@@ -228,12 +379,29 @@ def process_track(
     inst.notes = filter_by_pitch(inst.notes, pitch_min, pitch_max)
     after_pitch = len(inst.notes)
 
+    # Quantize: keep only loudest note per grid bin
+    if grid_sec is not None:
+        inst.notes = quantize_monophonic(inst.notes, grid_sec)
+        after_quantize = len(inst.notes)
+    else:
+        after_quantize = after_pitch
+
     if verbose:
-        print(f"\n  Filtered: {original_count} -> {after_velocity} (velocity) -> {after_pitch} (pitch)")
+        if grid_sec is not None:
+            print(f"\n  Filtered: {original_count} -> {after_velocity} (velocity) -> {after_pitch} (pitch) -> {after_quantize} (quantize)")
+        else:
+            print(f"\n  Filtered: {original_count} -> {after_velocity} (velocity) -> {after_pitch} (pitch)")
         print_histogram(inst.notes, f"AFTER velocity: {inst.name}")
         print_pitch_histogram(inst.notes, f"AFTER pitch: {inst.name}")
 
-    return original_count, after_pitch
+        # Show final polyphony stats
+        if grid_sec is not None and inst.notes:
+            _, mono, poly = count_polyphonic_bins(inst.notes, grid_sec)
+            total = mono + poly
+            if total > 0:
+                print(f"  Final polyphony: {poly} of {total} bins ({100*poly/total:.1f}%)")
+
+    return original_count, after_quantize
 
 
 def main():
@@ -243,8 +411,9 @@ def main():
 Examples:
   %(prog)s Song Clean1                  # data/midi/Song/Song.mid -> SongClean1.mid
   %(prog)s Song Clean1 --bass -t 40     # Bass only, threshold 40
+  %(prog)s Song Clean1 --bass -q 16     # Bass, keep loudest per 16th note
+  %(prog)s Song Clean1 --bass -q 16 --auto-mono  # Auto-find monophonic threshold
   %(prog)s Song -H                      # Histogram only (output ignored)
-  %(prog)s path/to/in.mid out.mid       # Explicit paths
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -286,6 +455,14 @@ Examples:
         "--pitch-min", type=int, default=None,
         help="Minimum pitch (MIDI note number). Default: 0"
     )
+    parser.add_argument(
+        "--quantize", "-q", type=int, default=None,
+        help="Keep only loudest note per N-th note grid (e.g., 16 for 16th notes)"
+    )
+    parser.add_argument(
+        "--auto-mono", "-m", action="store_true",
+        help="Auto-find velocity threshold for monophonic output (requires --quantize)"
+    )
 
     args = parser.parse_args()
 
@@ -302,6 +479,19 @@ Examples:
     print(f"Input:  {input_path}")
     print(f"Output: {output_path}")
     print(f"Tracks: {[inst.name for inst in pm.instruments]}")
+
+    # Compute quantization grid if requested
+    grid_sec = None
+    if args.quantize is not None:
+        tempo = pm.estimate_tempo()
+        grid_sec = grid_from_tempo_and_quantize(tempo, args.quantize)
+        print(f"\nTempo: {tempo:.1f} BPM")
+        print(f"Quantize grid: 1/{args.quantize} note = {grid_sec*1000:.1f} ms")
+        if args.auto_mono:
+            print("Auto-mono: will find threshold for monophonic output")
+
+    if args.auto_mono and args.quantize is None:
+        print("Warning: --auto-mono requires --quantize, ignoring", file=sys.stderr)
 
     # Determine which tracks to process
     if args.bass:
@@ -346,6 +536,8 @@ Examples:
             pitch_min=pitch_min,
             pitch_max=p_max,
             histogram_only=args.histogram_only,
+            grid_sec=grid_sec,
+            auto_mono=args.auto_mono,
         )
         total_before += before
         total_after += after

@@ -1,4 +1,4 @@
-.PHONY: help setup run run-normalize stems drum-stems review export clean-stems clean-midi clean-manifests clean-all process-file stem drum-stem midi-filter midi-filter-bass midi-histogram
+.PHONY: help setup run run-normalize stems drum-stems review export clean-stems clean-midi clean-manifests clean-all process-file stem drum-stem midi-filter midi-filter-bass midi-filter-bass-mono midi-histogram
 
 # Default target: show help
 help:
@@ -21,6 +21,7 @@ help:
 	@echo "MIDI CLEANUP (velocity/pitch filtering):"
 	@echo "  make midi-filter NAME=Song [SUFFIX=Clean1] [T=40]  - Filter all tracks"
 	@echo "  make midi-filter-bass NAME=Song [SUFFIX=Clean1]    - Filter bass only (pitch<=C4)"
+	@echo "  make midi-filter-bass-mono NAME=Song [Q=16]        - Bass monophonic (1 note per Qth)"
 	@echo "  make midi-histogram NAME=Song                      - Show histograms (no output)"
 	@echo "  (Paths expand: NAME -> data/midi/NAME/NAME.mid, SUFFIX -> NAMESuffix.mid)"
 	@echo ""
@@ -128,6 +129,15 @@ midi-filter-bass:
 	fi
 	@echo "==> Filtering bass track $(NAME)..."
 	$(PYTHON) clean-midi.py "$(NAME)" "$(SUFFIX)" --bass $(if $(T),--threshold $(T),)
+
+Q ?= 16
+midi-filter-bass-mono:
+	@if [ -z "$(NAME)" ]; then \
+		echo "Error: NAME required. Usage: make midi-filter-bass-mono NAME=Song [Q=16]"; \
+		exit 1; \
+	fi
+	@echo "==> Filtering bass track $(NAME) to monophonic (1/$(Q) note grid)..."
+	$(PYTHON) clean-midi.py "$(NAME)" "BassMono" --bass --quantize $(Q) --auto-mono
 
 midi-histogram:
 	@if [ -z "$(NAME)" ]; then \
