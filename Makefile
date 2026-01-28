@@ -1,4 +1,4 @@
-.PHONY: help setup run run-normalize stems drum-stems review export clean-stems clean-midi clean-manifests clean-all process-file stem drum-stem
+.PHONY: help setup run run-normalize stems drum-stems review export clean-stems clean-midi clean-manifests clean-all process-file stem drum-stem midi-filter midi-filter-bass midi-histogram
 
 # Default target: show help
 help:
@@ -17,6 +17,12 @@ help:
 	@echo "  make drum-stems PATTERN=<glob> - Convert drum stems to MIDI with ADTOF"
 	@echo "  make stem FILE=<path>          - Convert single stem with Basic Pitch"
 	@echo "  make drum-stem FILE=<path>     - Convert single drum stem with ADTOF"
+	@echo ""
+	@echo "MIDI CLEANUP (velocity/pitch filtering):"
+	@echo "  make midi-filter IN=<in.mid> OUT=<out.mid>       - Filter all tracks (Otsu threshold)"
+	@echo "  make midi-filter IN=<in.mid> OUT=<out.mid> T=40  - Filter with manual threshold"
+	@echo "  make midi-filter-bass IN=<in.mid> OUT=<out.mid>  - Filter bass only (pitch<=C4)"
+	@echo "  make midi-histogram IN=<in.mid>                  - Show histograms (no output)"
 	@echo ""
 	@echo "OTHER:"
 	@echo "  make review             - Open review UI for low-confidence items"
@@ -102,6 +108,32 @@ drum-stem:
 	fi
 	@echo "==> Converting $(FILE) to MIDI with ADTOF..."
 	$(PYTHON) pipeline.py run-batch "$(FILE)" --assume-drum-stems
+
+# MIDI cleanup targets
+T ?=
+midi-filter:
+	@if [ -z "$(IN)" ] || [ -z "$(OUT)" ]; then \
+		echo "Error: IN and OUT required. Usage: make midi-filter IN=input.mid OUT=output.mid [T=threshold]"; \
+		exit 1; \
+	fi
+	@echo "==> Filtering MIDI $(IN) -> $(OUT)..."
+	$(PYTHON) clean-midi.py "$(IN)" "$(OUT)" $(if $(T),--threshold $(T),)
+
+midi-filter-bass:
+	@if [ -z "$(IN)" ] || [ -z "$(OUT)" ]; then \
+		echo "Error: IN and OUT required. Usage: make midi-filter-bass IN=input.mid OUT=output.mid [T=threshold]"; \
+		exit 1; \
+	fi
+	@echo "==> Filtering bass track $(IN) -> $(OUT)..."
+	$(PYTHON) clean-midi.py "$(IN)" "$(OUT)" --bass $(if $(T),--threshold $(T),)
+
+midi-histogram:
+	@if [ -z "$(IN)" ]; then \
+		echo "Error: IN required. Usage: make midi-histogram IN=input.mid"; \
+		exit 1; \
+	fi
+	@echo "==> Showing histograms for $(IN)..."
+	$(PYTHON) clean-midi.py "$(IN)" /dev/null --histogram-only
 
 # Clean targets
 clean-stems:
