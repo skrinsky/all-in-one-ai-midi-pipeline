@@ -3,15 +3,18 @@
 clean-midi.py - Filter MIDI tracks using adaptive velocity thresholding.
 
 Usage:
-    python clean-midi.py input.mid output.mid              # Clean all tracks
-    python clean-midi.py input.mid output.mid --bass       # Bass-specific filtering
-    python clean-midi.py input.mid output.mid --track NAME # Single track
+    python clean-midi.py Song Clean1                       # data/midi/Song/Song.mid -> SongClean1.mid
+    python clean-midi.py Song.mid SongClean1.mid           # Same, explicit .mid
+    python clean-midi.py path/to/in.mid path/to/out.mid    # Explicit paths
+    python clean-midi.py Song Clean1 --bass                # Bass-specific filtering
+    python clean-midi.py Song Clean1 --track guitar        # Single track
 
 If no threshold is given, computes an adaptive threshold using Otsu's method
 on the velocity histogram for each track.
 """
 
 import argparse
+import os
 import sys
 import numpy as np
 import pretty_midi
@@ -19,6 +22,44 @@ import pretty_midi
 
 # Bass typically ranges E1 (28) to around G3 (55), maybe up to C4 (60)
 DEFAULT_BASS_PITCH_MAX = 60  # C4
+DEFAULT_MIDI_DIR = "data/midi"
+
+
+def resolve_paths(input_arg: str, output_arg: str, midi_dir: str) -> tuple[str, str]:
+    """
+    Resolve input/output arguments to full paths.
+
+    If input_arg is a simple name (no path separator, optionally with .mid),
+    expand to: {midi_dir}/{name}/{name}.mid
+
+    If output_arg is a simple suffix (no path separator, no .mid),
+    create output as: {midi_dir}/{name}/{name}{suffix}.mid
+    """
+    # Normalize input
+    if os.path.sep in input_arg or input_arg.startswith("."):
+        # Explicit path provided
+        input_path = input_arg
+        # Extract base name for output resolution
+        base_name = os.path.splitext(os.path.basename(input_arg))[0]
+        base_dir = os.path.dirname(input_arg)
+    else:
+        # Simple name - expand to data/midi/Name/Name.mid
+        base_name = input_arg.replace(".mid", "")
+        base_dir = os.path.join(midi_dir, base_name)
+        input_path = os.path.join(base_dir, f"{base_name}.mid")
+
+    # Normalize output
+    if os.path.sep in output_arg or output_arg.startswith("."):
+        # Explicit path provided
+        output_path = output_arg
+    elif output_arg.endswith(".mid"):
+        # Filename with .mid extension - put in same dir as input
+        output_path = os.path.join(base_dir, output_arg)
+    else:
+        # Simple suffix - append to base name
+        output_path = os.path.join(base_dir, f"{base_name}{output_arg}.mid")
+
+    return input_path, output_path
 
 
 def velocity_histogram(notes: list, bins: int = 13) -> tuple[np.ndarray, np.ndarray]:
@@ -197,10 +238,30 @@ def process_track(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Filter MIDI tracks using adaptive velocity thresholding."
+        description="Filter MIDI tracks using adaptive velocity thresholding.",
+        epilog="""
+Examples:
+  %(prog)s Song Clean1                  # data/midi/Song/Song.mid -> SongClean1.mid
+  %(prog)s Song Clean1 --bass -t 40     # Bass only, threshold 40
+  %(prog)s Song -H                      # Histogram only (output ignored)
+  %(prog)s path/to/in.mid out.mid       # Explicit paths
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("input", help="Input MIDI file")
-    parser.add_argument("output", help="Output MIDI file")
+    parser.add_argument(
+        "input",
+        help="Input: MIDI path OR base name (expands to data/midi/NAME/NAME.mid)"
+    )
+    parser.add_argument(
+        "output",
+        nargs="?",
+        default="Cleaned",
+        help="Output: MIDI path OR suffix (default: 'Cleaned' -> NAMECleaned.mid)"
+    )
+    parser.add_argument(
+        "--midi-dir", "-d", default=DEFAULT_MIDI_DIR,
+        help=f"Base directory for MIDI files (default: {DEFAULT_MIDI_DIR})"
+    )
     parser.add_argument(
         "--threshold", "-t", type=int, default=None,
         help="Velocity threshold (default: auto via Otsu's method per track)"
@@ -228,14 +289,18 @@ def main():
 
     args = parser.parse_args()
 
+    # Resolve paths
+    input_path, output_path = resolve_paths(args.input, args.output, args.midi_dir)
+
     # Load MIDI
     try:
-        pm = pretty_midi.PrettyMIDI(args.input)
+        pm = pretty_midi.PrettyMIDI(input_path)
     except Exception as e:
-        print(f"Error loading {args.input}: {e}", file=sys.stderr)
+        print(f"Error loading {input_path}: {e}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Loaded: {args.input}")
+    print(f"Input:  {input_path}")
+    print(f"Output: {output_path}")
     print(f"Tracks: {[inst.name for inst in pm.instruments]}")
 
     # Determine which tracks to process
@@ -293,8 +358,8 @@ def main():
         sys.exit(0)
 
     # Write output
-    pm.write(args.output)
-    print(f"\nWrote: {args.output}")
+    pm.write(output_path)
+    print(f"\nWrote: {output_path}")
 
 
 if __name__ == "__main__":
