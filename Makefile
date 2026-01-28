@@ -1,4 +1,4 @@
-.PHONY: help setup run run-normalize run-stems run-drum-stems review export clean-stems clean-midi clean-manifests clean-all process-file process-stem process-drum-stem
+.PHONY: help setup run run-normalize stems drum-stems review export clean-stems clean-midi clean-manifests clean-all process-file stem drum-stem
 
 # Default target: show help
 help:
@@ -13,10 +13,10 @@ help:
 	@echo "  make process-file-norm FILE=<path>      - Process a single file with key normalization"
 	@echo ""
 	@echo "STEM-TO-MIDI (direct conversion, no separation):"
-	@echo "  make run-stems PATTERN=<glob>           - Convert stems to MIDI with Basic Pitch"
-	@echo "  make run-drum-stems PATTERN=<glob>      - Convert drum stems to MIDI with ADTOF"
-	@echo "  make process-stem FILE=<path>           - Convert single stem with Basic Pitch"
-	@echo "  make process-drum-stem FILE=<path>      - Convert single drum stem with ADTOF"
+	@echo "  make stems PATTERN=<glob>      - Convert stems to MIDI with Basic Pitch"
+	@echo "  make drum-stems PATTERN=<glob> - Convert drum stems to MIDI with ADTOF"
+	@echo "  make stem FILE=<path>          - Convert single stem with Basic Pitch"
+	@echo "  make drum-stem FILE=<path>     - Convert single drum stem with ADTOF"
 	@echo ""
 	@echo "OTHER:"
 	@echo "  make review             - Open review UI for low-confidence items"
@@ -79,25 +79,25 @@ process-file-norm:
 # Stem-to-MIDI conversion (bypasses separation)
 PATTERN ?= data/stems/*.wav
 
-run-stems:
+stems:
 	@echo "==> Converting stems to MIDI with Basic Pitch ($(PATTERN))..."
 	$(PYTHON) pipeline.py run-batch "$(PATTERN)" --assume-stems
 
-run-drum-stems:
+drum-stems:
 	@echo "==> Converting drum stems to MIDI with ADTOF ($(PATTERN))..."
 	$(PYTHON) pipeline.py run-batch "$(PATTERN)" --assume-drum-stems
 
-process-stem:
+stem:
 	@if [ -z "$(FILE)" ]; then \
-		echo "Error: FILE not specified. Usage: make process-stem FILE=path/to/stem.wav"; \
+		echo "Error: FILE not specified. Usage: make stem FILE=path/to/stem.wav"; \
 		exit 1; \
 	fi
 	@echo "==> Converting $(FILE) to MIDI with Basic Pitch..."
 	$(PYTHON) pipeline.py run-batch "$(FILE)" --assume-stems
 
-process-drum-stem:
+drum-stem:
 	@if [ -z "$(FILE)" ]; then \
-		echo "Error: FILE not specified. Usage: make process-drum-stem FILE=path/to/drums.wav"; \
+		echo "Error: FILE not specified. Usage: make drum-stem FILE=path/to/drums.wav"; \
 		exit 1; \
 	fi
 	@echo "==> Converting $(FILE) to MIDI with ADTOF..."
