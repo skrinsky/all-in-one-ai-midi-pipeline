@@ -1,4 +1,4 @@
-.PHONY: help setup run run-normalize stems drum-stems review export clean-stems clean-midi clean-manifests clean-all process-file stem drum-stem midi-filter midi-filter-bass midi-filter-bass-mono midi-histogram
+.PHONY: help setup run run-normalize stems drum-stems review export clean-stems clean-midi clean-manifests clean-all process-file stem drum-stem midi-filter midi-filter-bass midi-filter-bass-octave midi-filter-bass-mono midi-histogram
 
 # Default target: show help
 help:
@@ -21,6 +21,7 @@ help:
 	@echo "MIDI CLEANUP (velocity/pitch filtering):"
 	@echo "  make midi-filter NAME=Song [SUFFIX=Clean1] [T=40]  - Filter all tracks"
 	@echo "  make midi-filter-bass NAME=Song [SUFFIX=Clean1]    - Filter bass only (pitch<=C4)"
+	@echo "  make midi-filter-bass-octave NAME=Song [T=40]      - Bass with octave collapse"
 	@echo "  make midi-filter-bass-mono NAME=Song [Q=16]        - Bass monophonic (1 note per Qth)"
 	@echo "  make midi-histogram NAME=Song                      - Show histograms (no output)"
 	@echo "  (Paths expand: NAME -> data/midi/NAME/NAME.mid, SUFFIX -> NAMESuffix.mid)"
@@ -129,6 +130,14 @@ midi-filter-bass:
 	fi
 	@echo "==> Filtering bass track $(NAME)..."
 	$(PYTHON) clean-midi.py "$(NAME)" "$(SUFFIX)" --bass $(if $(T),--threshold $(T),)
+
+midi-filter-bass-octave:
+	@if [ -z "$(NAME)" ]; then \
+		echo "Error: NAME required. Usage: make midi-filter-bass-octave NAME=Song [T=40]"; \
+		exit 1; \
+	fi
+	@echo "==> Filtering bass track $(NAME) with octave collapse..."
+	$(PYTHON) clean-midi.py "$(NAME)" "BassOctave" --bass --collapse-octaves $(if $(T),--threshold $(T),--threshold 40)
 
 Q ?= 16
 midi-filter-bass-mono:

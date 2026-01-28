@@ -180,6 +180,62 @@ def quantize_monophonic(notes: list, grid_sec: float) -> list:
     return result
 
 
+def collapse_octaves_fn(notes: list, time_thresh_sec: float = 0.05, keep: str = "lowest") -> list:
+    """
+    Collapse octave-doubled notes into single notes.
+
+    When notes start within time_thresh_sec of each other and are exactly
+    12 semitones apart, keep only one (lowest for bass, loudest, or highest).
+
+    Args:
+        notes: List of pretty_midi.Note objects
+        time_thresh_sec: Max time difference to consider notes "simultaneous"
+        keep: Which note to keep: "lowest", "highest", or "loudest"
+
+    Returns:
+        Filtered list with octave doublings collapsed.
+    """
+    if not notes or len(notes) < 2:
+        return notes
+
+    # Sort by start time
+    sorted_notes = sorted(notes, key=lambda n: n.start)
+
+    # Track which notes to remove (by index in sorted_notes)
+    to_remove = set()
+
+    for i, n1 in enumerate(sorted_notes):
+        if i in to_remove:
+            continue
+
+        # Look at nearby notes
+        for j in range(i + 1, len(sorted_notes)):
+            n2 = sorted_notes[j]
+
+            # Stop if too far in time
+            if n2.start - n1.start > time_thresh_sec:
+                break
+
+            if j in to_remove:
+                continue
+
+            # Check if octave-related (12, 24, 36 semitones apart)
+            pitch_diff = abs(n1.pitch - n2.pitch)
+            if pitch_diff > 0 and pitch_diff % 12 == 0:
+                # Octave doubling detected - decide which to remove
+                if keep == "lowest":
+                    remove_idx = i if n1.pitch > n2.pitch else j
+                elif keep == "highest":
+                    remove_idx = i if n1.pitch < n2.pitch else j
+                else:  # loudest
+                    remove_idx = i if n1.velocity < n2.velocity else j
+
+                to_remove.add(remove_idx)
+
+    result = [n for i, n in enumerate(sorted_notes) if i not in to_remove]
+    return result
+
+
 def count_polyphonic_bins(notes: list, grid_sec: float) -> tuple[int, int, int]:
     """
     Count bins with 0, 1, and 2+ notes.
@@ -301,6 +357,7 @@ def process_track(
     histogram_only: bool,
     grid_sec: float | None = None,
     auto_mono: bool = False,
+    collapse_octaves: bool = False,
     verbose: bool = True,
 ) -> tuple[int, int]:
     """
@@ -313,6 +370,7 @@ def process_track(
         histogram_only: If True, don't modify notes
         grid_sec: Quantization grid in seconds (None = no quantize filter)
         auto_mono: If True, find threshold for monophonic output instead of Otsu
+        collapse_octaves: If True, collapse octave-doubled notes (keep lowest)
         verbose: Print progress
 
     Returns (original_count, final_count).
@@ -361,16 +419,19 @@ def process_track(
     if histogram_only:
         kept = filter_by_velocity(inst.notes, thresh, keep_above=True)
         kept = filter_by_pitch(kept, pitch_min, pitch_max)
+        if collapse_octaves:
+            kept = collapse_octaves_fn(kept, keep="lowest")
         if grid_sec is not None:
             kept = quantize_monophonic(kept, grid_sec)
         dropped = original_count - len(kept)
         if verbose:
             print(f"\n  Would keep {len(kept)} notes, drop {dropped}")
-            desc = f"velocity >= {thresh}, pitch {pitch_min}-{pitch_max}"
+            parts = [f"velocity >= {thresh}", f"pitch {pitch_min}-{pitch_max}"]
+            if collapse_octaves:
+                parts.append("octaves collapsed")
             if grid_sec is not None:
-                print(f"    ({desc}, quantized to {grid_sec*1000:.1f}ms grid)")
-            else:
-                print(f"    ({desc})")
+                parts.append(f"quantized {grid_sec*1000:.1f}ms")
+            print(f"    ({', '.join(parts)})")
         return original_count, len(kept)
 
     # Filter notes
@@ -379,18 +440,27 @@ def process_track(
     inst.notes = filter_by_pitch(inst.notes, pitch_min, pitch_max)
     after_pitch = len(inst.notes)
 
+    # Collapse octave doublings (keep lowest for bass)
+    if collapse_octaves:
+        inst.notes = collapse_octaves_fn(inst.notes, keep="lowest")
+        after_octave = len(inst.notes)
+    else:
+        after_octave = after_pitch
+
     # Quantize: keep only loudest note per grid bin
     if grid_sec is not None:
         inst.notes = quantize_monophonic(inst.notes, grid_sec)
         after_quantize = len(inst.notes)
     else:
-        after_quantize = after_pitch
+        after_quantize = after_octave
 
     if verbose:
+        steps = [f"{original_count}", f"{after_velocity} (velocity)", f"{after_pitch} (pitch)"]
+        if collapse_octaves:
+            steps.append(f"{after_octave} (octave)")
         if grid_sec is not None:
-            print(f"\n  Filtered: {original_count} -> {after_velocity} (velocity) -> {after_pitch} (pitch) -> {after_quantize} (quantize)")
-        else:
-            print(f"\n  Filtered: {original_count} -> {after_velocity} (velocity) -> {after_pitch} (pitch)")
+            steps.append(f"{after_quantize} (quantize)")
+        print(f"\n  Filtered: {' -> '.join(steps)}")
         print_histogram(inst.notes, f"AFTER velocity: {inst.name}")
         print_pitch_histogram(inst.notes, f"AFTER pitch: {inst.name}")
 
@@ -462,6 +532,10 @@ Examples:
     parser.add_argument(
         "--auto-mono", "-m", action="store_true",
         help="Auto-find velocity threshold for monophonic output (requires --quantize)"
+    )
+    parser.add_argument(
+        "--collapse-octaves", "-o", action="store_true",
+        help="Collapse octave-doubled notes (keep lowest for bass)"
     )
 
     args = parser.parse_args()
@@ -538,6 +612,7 @@ Examples:
             histogram_only=args.histogram_only,
             grid_sec=grid_sec,
             auto_mono=args.auto_mono,
+            collapse_octaves=args.collapse_octaves,
         )
         total_before += before
         total_after += after
