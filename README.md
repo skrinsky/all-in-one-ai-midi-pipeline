@@ -2,7 +2,9 @@
 
 End-to-end, mostly automatic pipeline for turning your own stereo masters into aligned, labeled multi-track MIDI suitable for model training.
 
-**Stereo in → stems → tempo/meter → transcription → canonical tracks → (optional) key normalization → cleaned multi-track MIDI**
+**Stereo in → stems → tempo/meter → transcription → canonical tracks → (optional) key normalization → (optional) cleaning → multi-track MIDI**
+
+> Cleaning is **ON by default**. Disable all MIDI cleaning/post-processing (including transcription-time filters and the final cleanup step) with `--no-clean`.
 
 ---
 
@@ -32,12 +34,14 @@ End-to-end, mostly automatic pipeline for turning your own stereo masters into a
 
 #### 3.1 Pitched (Basic Pitch 0.2.6)
 
-Run on stems with tempo-aware settings and cleanup.
+Run on stems with tempo-aware settings.
+
+Pitched transcription includes optional MIDI cleaning/post-processing (enabled by default). Disable with `--no-clean`.
 
 ##### Vocals (`vocals` stem)
 
 - Basic Pitch → note events
-- Vocal-specific tweaks:
+- Vocal-specific tweaks (when cleaning is enabled):
   - higher onset/frame thresholds
   - minimum note length
   - merge same-pitch segments (reduce double hits)
@@ -49,7 +53,7 @@ Run on stems with tempo-aware settings and cleanup.
 ##### Bass
 
 - Basic Pitch on `bass`
-- Optional filtering to reduce obvious junk / octave errors
+- Optional filtering to reduce obvious junk / octave errors (when cleaning is enabled)
 
 ##### Guitar
 
@@ -157,6 +161,18 @@ When disabled:
 - Applies gentle timing/length cleanup
 - Tries not to destroy groove/feel
 
+Cleanup is **enabled by default**. Disable with `--no-clean` to bypass this step *and* transcription-time cleaning inside `steps/transcribe_melodic.py`.
+
+When `--no-clean` is used, the manifest records:
+
+    "pipeline_flags": {
+      "no_clean": true
+    },
+    "cleanup": {
+      "enabled": false,
+      "reason": "cleanup disabled via CLI (--no-clean)"
+    }
+
 ---
 
 ### 8. Multi-track MIDI Export
@@ -214,13 +230,21 @@ Key dependencies (see `requirements.txt` for exact pins):
 
 ### 2. Run the Pipeline
 
-Default (no key normalization):
+Default (no key normalization, cleaning enabled):
 
     python pipeline.py run-batch "data/raw/*.wav"
 
 With key normalization (C major / A minor):
 
     python pipeline.py run-batch "data/raw/*.wav" --normalize-key
+
+Disable MIDI cleaning/post-processing (rawer transcription, skips final cleanup):
+
+    python pipeline.py run-batch "data/raw/*.wav" --no-clean
+
+With key normalization but no cleaning:
+
+    python pipeline.py run-batch "data/raw/*.wav" --normalize-key --no-clean
 
 ### 3. Inspect Outputs
 

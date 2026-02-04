@@ -20,36 +20,45 @@ import pretty_midi
 CFG = load_config("config.yaml")
 
 
-def process_one(audio_path: str, normalize_key: bool = False):
+def process_one(audio_path: str, normalize_key: bool = False, no_clean: bool = False):
+    # Make a per-run config so we can safely inject flags without mutating global CFG
+    cfg = dict(CFG)
+    cfg["no_clean"] = bool(no_clean)
+
     sid = song_id_from_path(audio_path)
     os.makedirs(f"data/midi/{sid}", exist_ok=True)
+
     manifest_path = f"manifests/{sid}.json"
     manifest = read_manifest(manifest_path)
     manifest.setdefault("song_id", sid)
     manifest.setdefault("source_audio", audio_path)
 
+    # record CLI intent (useful for debugging)
+    manifest.setdefault("pipeline_flags", {})
+    manifest["pipeline_flags"]["normalize_key"] = bool(normalize_key)
+    manifest["pipeline_flags"]["no_clean"] = bool(no_clean)
+
     # 1) separation
-    stems = separate_track(audio_path, CFG, manifest)
+    stems = separate_track(audio_path, cfg, manifest)
     write_manifest(manifest_path, manifest)
 
     # 2) tempo/downbeats/meter
-    meter_info = estimate_tempo_downbeats_meter(stems, CFG, manifest)
+    meter_info = estimate_tempo_downbeats_meter(stems, cfg, manifest)
     write_manifest(manifest_path, manifest)
 
     # 3) transcription
-    pitched = transcribe_pitched_tracks(stems, CFG, manifest)
-    drums = transcribe_drums_to_midi(stems.get("drums"), CFG, manifest)
+    pitched = transcribe_pitched_tracks(stems, cfg, manifest)
+    drums = transcribe_drums_to_midi(stems.get("drums"), cfg, manifest)
     write_manifest(manifest_path, manifest)
 
     # 4) assign 7 classes
-    assigned = assign_seven_classes(pitched, drums, stems, CFG, manifest)
+    assigned = assign_seven_classes(pitched, drums, stems, cfg, manifest)
     write_manifest(manifest_path, manifest)
 
     # 5) key normalize (optional)
     if normalize_key:
-        normalized = detect_and_normalize_key(assigned, CFG, manifest)
+        normalized = detect_and_normalize_key(assigned, cfg, manifest)
     else:
-        # mark explicitly that we skipped normalization
         key_info = manifest.setdefault("key", {})
         key_info.setdefault("normalized", False)
         key_info.setdefault("transpose_semitones", 0)
@@ -59,16 +68,24 @@ def process_one(audio_path: str, normalize_key: bool = False):
     write_manifest(manifest_path, manifest)
 
     # 6) meter insertion (optional, based on meter_info)
-    with_meter = insert_time_signatures(normalized, meter_info, CFG, manifest)
+    with_meter = insert_time_signatures(normalized, meter_info, cfg, manifest)
     write_manifest(manifest_path, manifest)
 
-    # 7) cleanup
-    cleaned = gentle_cleanup(with_meter, CFG, manifest)
+    # 7) cleanup (optional)
+    cleanup_info = manifest.setdefault("cleanup", {})
+    if no_clean:
+        cleanup_info["enabled"] = False
+        cleanup_info["reason"] = "cleanup disabled via CLI (--no-clean)"
+        cleaned = with_meter
+    else:
+        cleanup_info["enabled"] = True
+        cleaned = gentle_cleanup(with_meter, cfg, manifest)
+
     write_manifest(manifest_path, manifest)
 
     # 8) write MIDI
     out_mid = f"data/midi/{sid}/{sid}.mid"
-    assemble_and_write_midi(cleaned, meter_info, out_mid, CFG, manifest)
+    assemble_and_write_midi(cleaned, meter_info, out_mid, cfg, manifest)
     write_manifest(manifest_path, manifest)
 
     return out_mid, manifest_path
@@ -135,7 +152,8 @@ def process_one_stem(audio_path: str, use_drums: bool = False):
     return out_mid, manifest_path
 
 
-def cmd_run_batch(pattern: str, normalize_key: bool = False, assume_stems: bool = False, assume_drum_stems: bool = False):
+def cmd_run_batch(pattern: str, normalize_key: bool = False, no_clean: bool = False,
+                  assume_stems: bool = False, assume_drum_stems: bool = False):
     files = sorted(glob.glob(pattern))
     if not files:
         print(f"No files match: {pattern}")
@@ -155,7 +173,7 @@ def cmd_run_batch(pattern: str, normalize_key: bool = False, assume_stems: bool 
         # Full pipeline processing
         for f in tqdm(files, desc="Processing files"):
             try:
-                out_mid, mani = process_one(f, normalize_key=normalize_key)
+                out_mid, mani = process_one(f, normalize_key=normalize_key, no_clean=no_clean)
                 print(f"[OK] {f} -> {out_mid}  (manifest: {mani})")
             except Exception as e:
                 print(f"[ERR] {f}: {e}")
@@ -190,6 +208,11 @@ def main():
         help="Normalize pitched tracks to Cmaj/Amin",
     )
     r.add_argument(
+        "--no-clean",
+        action="store_true",
+        help="Disable MIDI cleaning/post-processing",
+    )
+    r.add_argument(
         "--assume-stems",
         action="store_true",
         help="Skip separation; convert each .wav directly to MIDI using Basic Pitch",
@@ -219,6 +242,7 @@ def main():
         return cmd_run_batch(
             args.pattern,
             normalize_key=args.normalize_key,
+            no_clean=args.no_clean,
             assume_stems=args.assume_stems,
             assume_drum_stems=args.assume_drum_stems,
         )

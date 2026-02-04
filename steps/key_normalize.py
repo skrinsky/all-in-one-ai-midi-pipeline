@@ -148,6 +148,20 @@ def _transpose_instruments(instruments, semitones):
 
     return out
 
+def detect_key_only(assigned_instruments, manifest):
+    pitches = _collect_pitches(assigned_instruments)
+    tonic, mode = _detect_key_music21(pitches)
+
+    key_info = manifest.setdefault("key", {})
+    key_info["detected_tonic"] = tonic
+    key_info["detected_mode"] = mode
+
+    # no transposition here
+    key_info["normalized"] = False
+    key_info["transpose_semitones"] = 0
+    key_info["target"] = None
+    return tonic, mode
+
 
 def detect_and_normalize_key(assigned_instruments, CFG, manifest):
     """
